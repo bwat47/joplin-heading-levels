@@ -20,6 +20,9 @@
         "publish"
     ],
     "devDependencies": {
+        "@codemirror/language": "^6.12.3",
+        "@codemirror/state": "^6.6.0",
+        "@codemirror/view": "^6.41.0",
         "@eslint/js": "^10.0.1",
         "@eslint/eslintrc": "^3.3.5",
         "@types/node": "^25.6.0",
