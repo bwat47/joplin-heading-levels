@@ -18,9 +18,16 @@ const DEFAULT_CONFIG: Config = { gutterPlacement: 'after' };
 // ---------------------------------------------------------------------------
 
 const STYLES = `
+/* Remove the gutter panel's background and separator so our markers sit
+   flush against the editor text with no visible column boundary. */
+.cm-editor .cm-gutters {
+    background-color: transparent;
+    border-right: none;
+}
 .hl-gutter {
-    min-width: 2.2em;
-    padding: 0 4px;
+    background: transparent;
+    min-width: 2em;
+    padding: 0 2px 0 4px;
 }
 .hl-gutter-before {
     order: -1;
@@ -29,19 +36,22 @@ const STYLES = `
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.7em;
-    font-weight: 600;
+    font-size: 0.75em;
+    font-weight: 500;
     line-height: 1;
     height: 100%;
     padding: 0 2px;
     border-radius: 3px;
     cursor: pointer;
     color: var(--joplin-color-faded, #888);
+    opacity: 0.6;
     user-select: none;
+    transition: opacity 0.15s;
 }
 .hl-gutter-marker:hover {
+    opacity: 1;
     color: var(--joplin-color, inherit);
-    background: var(--joplin-background-color-hover3, rgba(128,128,128,0.15));
+    background: var(--joplin-background-color-hover3, rgba(128,128,128,0.12));
 }
 .hl-popup {
     position: fixed;
