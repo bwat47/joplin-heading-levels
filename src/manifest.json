@@ -9,9 +9,9 @@
     "author": "bwat47",
     "homepage_url": "https://github.com/bwat47/joplin-heading-levels",
     "repository_url": "https://github.com/bwat47/joplin-heading-levels",
-    "keywords": [],
-    "categories": [],
-    "screenshots": [],
+    "keywords": ["headings", "gutter", "codemirror"],
+    "categories": ["editor"],
+    "screenshots": [{ "src": "images/screenshot1.png", "label": "Heading Levels Screenshot 1" }],
     "icons": {},
     "promo_tile": {}
 }
