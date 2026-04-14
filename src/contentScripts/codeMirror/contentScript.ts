@@ -1,8 +1,9 @@
-import { EditorView, gutter, GutterMarker } from '@codemirror/view';
+import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { Compartment, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
 import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
+import { calculateGutterOffset } from './layoutHelpers';
 import { logger } from '../../logger';
 
 const COMMAND_SET_CONFIG = 'headingLevels__setConfig';
@@ -93,6 +94,87 @@ function ensureStylesInjected(): void {
     style.textContent = STYLES;
     document.head.appendChild(style);
 }
+
+function getContentPaddingStart(contentEl: HTMLElement): number {
+    const computedStyle = window.getComputedStyle(contentEl);
+    const padding = computedStyle.paddingInlineStart || computedStyle.paddingLeft || '0';
+    const value = Number.parseFloat(padding);
+
+    return Number.isFinite(value) ? value : 0;
+}
+
+function syncGutterAlignment(view: EditorView): void {
+    const gutterWrapper = view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
+    if (!gutterWrapper) return;
+
+    const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const contentRect = view.contentDOM.getBoundingClientRect();
+    const gutterRect = gutterWrapper.getBoundingClientRect();
+    const nextOffset = calculateGutterOffset({
+        scrollerLeft: scrollerRect.left,
+        contentLeft: contentRect.left,
+        gutterWidth: gutterRect.width,
+        contentPaddingStart: getContentPaddingStart(view.contentDOM),
+    });
+    const nextLeft = `${nextOffset}px`;
+
+    if (gutterWrapper.style.left !== nextLeft) {
+        gutterWrapper.style.left = nextLeft;
+    }
+}
+
+class GutterAlignmentPlugin {
+    private frameHandle: number | null = null;
+
+    private readonly resizeObserver: ResizeObserver | null;
+
+    private readonly handleWindowResize = () => {
+        this.scheduleSync();
+    };
+
+    constructor(private readonly view: EditorView) {
+        this.scheduleSync();
+
+        if (typeof ResizeObserver !== 'undefined') {
+            this.resizeObserver = new ResizeObserver(() => {
+                this.scheduleSync();
+            });
+            this.resizeObserver.observe(this.view.dom);
+            this.resizeObserver.observe(this.view.scrollDOM);
+            this.resizeObserver.observe(this.view.contentDOM);
+        } else {
+            this.resizeObserver = null;
+            window.addEventListener('resize', this.handleWindowResize);
+        }
+    }
+
+    update(update: ViewUpdate): void {
+        if (update.docChanged || update.viewportChanged || update.geometryChanged) {
+            this.scheduleSync();
+        }
+    }
+
+    destroy(): void {
+        if (this.frameHandle !== null) {
+            window.cancelAnimationFrame(this.frameHandle);
+            this.frameHandle = null;
+        }
+
+        this.resizeObserver?.disconnect();
+        window.removeEventListener('resize', this.handleWindowResize);
+    }
+
+    private scheduleSync(): void {
+        if (this.frameHandle !== null) return;
+
+        this.frameHandle = window.requestAnimationFrame(() => {
+            this.frameHandle = null;
+            syncGutterAlignment(this.view);
+        });
+    }
+}
+
+const gutterAlignmentExtension = ViewPlugin.fromClass(GutterAlignmentPlugin);
 
 // ---------------------------------------------------------------------------
 // Gutter marker
@@ -334,7 +416,7 @@ export default function (context: ContentScriptContext) {
 
             const gutterCompartment = new Compartment();
 
-            editorControl.addExtension(gutterCompartment.of(createGutterExtension(config)));
+            editorControl.addExtension([gutterCompartment.of(createGutterExtension(config)), gutterAlignmentExtension]);
 
             // Command for live config updates pushed from the main plugin
             editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
