@@ -4,6 +4,14 @@ import { Compartment, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
 import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
 import { calculateGutterOffset } from './layoutHelpers';
+import {
+    cancelViewAnimationFrame,
+    getDocumentWindow,
+    getViewDocument,
+    getViewResizeObserver,
+    getViewWindow,
+    requestViewAnimationFrame,
+} from './domContext';
 import { logger } from '../../logger';
 
 const COMMAND_SET_CONFIG = 'headingLevels__setConfig';
@@ -87,16 +95,19 @@ const STYLES = `
 }
 `;
 
-function ensureStylesInjected(): void {
-    if (document.getElementById('hl-plugin-styles')) return;
-    const style = document.createElement('style');
+function ensureStylesInjected(view: EditorView): void {
+    const doc = getViewDocument(view);
+
+    if (doc.getElementById('hl-plugin-styles')) return;
+
+    const style = doc.createElement('style');
     style.id = 'hl-plugin-styles';
     style.textContent = STYLES;
-    document.head.appendChild(style);
+    doc.head.appendChild(style);
 }
 
 function getContentPaddingStart(contentEl: HTMLElement): number {
-    const computedStyle = window.getComputedStyle(contentEl);
+    const computedStyle = getDocumentWindow(contentEl.ownerDocument).getComputedStyle(contentEl);
     const padding = computedStyle.paddingInlineStart || computedStyle.paddingLeft || '0';
     const value = Number.parseFloat(padding);
 
@@ -128,15 +139,20 @@ class GutterAlignmentPlugin {
 
     private readonly resizeObserver: ResizeObserver | null;
 
+    private readonly viewWindow: Window;
+
     private readonly handleWindowResize = () => {
         this.scheduleSync();
     };
 
     constructor(private readonly view: EditorView) {
+        this.viewWindow = getViewWindow(view);
         this.scheduleSync();
 
-        if (typeof ResizeObserver !== 'undefined') {
-            this.resizeObserver = new ResizeObserver(() => {
+        const ResizeObserverCtor = getViewResizeObserver(view);
+
+        if (ResizeObserverCtor) {
+            this.resizeObserver = new ResizeObserverCtor(() => {
                 this.scheduleSync();
             });
             this.resizeObserver.observe(this.view.dom);
@@ -144,7 +160,7 @@ class GutterAlignmentPlugin {
             this.resizeObserver.observe(this.view.contentDOM);
         } else {
             this.resizeObserver = null;
-            window.addEventListener('resize', this.handleWindowResize);
+            this.viewWindow.addEventListener('resize', this.handleWindowResize);
         }
     }
 
@@ -156,18 +172,18 @@ class GutterAlignmentPlugin {
 
     destroy(): void {
         if (this.frameHandle !== null) {
-            window.cancelAnimationFrame(this.frameHandle);
+            cancelViewAnimationFrame(this.view, this.frameHandle);
             this.frameHandle = null;
         }
 
         this.resizeObserver?.disconnect();
-        window.removeEventListener('resize', this.handleWindowResize);
+        this.viewWindow.removeEventListener('resize', this.handleWindowResize);
     }
 
     private scheduleSync(): void {
         if (this.frameHandle !== null) return;
 
-        this.frameHandle = window.requestAnimationFrame(() => {
+        this.frameHandle = requestViewAnimationFrame(this.view, () => {
             this.frameHandle = null;
             syncGutterAlignment(this.view);
         });
@@ -185,8 +201,8 @@ class HeadingMarker extends GutterMarker {
         super();
     }
 
-    toDOM(): HTMLElement {
-        const el = document.createElement('div');
+    toDOM(view: EditorView): HTMLElement {
+        const el = getViewDocument(view).createElement('div');
         el.className = 'hl-gutter-marker';
         el.setAttribute('data-level', String(this.level));
         el.textContent = `H${this.level}`;
@@ -225,6 +241,7 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
 // ---------------------------------------------------------------------------
 
 interface PopupState {
+    doc: Document;
     el: HTMLElement;
     outsideClickHandler: (e: MouseEvent) => void;
     escapeHandler: (e: KeyboardEvent) => void;
@@ -235,10 +252,10 @@ let activePopup: PopupState | null = null;
 
 function closePopup(): void {
     if (!activePopup) return;
-    const { el, outsideClickHandler, escapeHandler, blurCleanup } = activePopup;
+    const { doc, el, outsideClickHandler, escapeHandler, blurCleanup } = activePopup;
     el.remove();
-    document.removeEventListener('mousedown', outsideClickHandler);
-    document.removeEventListener('keydown', escapeHandler);
+    doc.removeEventListener('mousedown', outsideClickHandler);
+    doc.removeEventListener('keydown', escapeHandler);
     blurCleanup();
     activePopup = null;
 }
@@ -246,12 +263,15 @@ function closePopup(): void {
 function openPopup(view: EditorView, headingLineNumber: number, currentLevel: number, anchorEl: HTMLElement): void {
     closePopup();
 
-    const popup = document.createElement('div');
+    const doc = getViewDocument(view);
+    const viewWindow = getViewWindow(view);
+
+    const popup = doc.createElement('div');
     popup.className = 'hl-popup';
     popup.setAttribute('role', 'menu');
 
     for (let l = 1; l <= 6; l++) {
-        const item = document.createElement('div');
+        const item = doc.createElement('div');
         item.className = 'hl-popup-item';
         if (l === currentLevel) item.classList.add('hl-popup-item-current');
         item.textContent = `Heading ${l}`;
@@ -270,7 +290,7 @@ function openPopup(view: EditorView, headingLineNumber: number, currentLevel: nu
     popup.style.position = 'fixed';
     popup.style.left = '-9999px';
     popup.style.top = '-9999px';
-    document.body.appendChild(popup);
+    doc.body.appendChild(popup);
 
     const popupRect = popup.getBoundingClientRect();
     const anchorRect = anchorEl.getBoundingClientRect();
@@ -278,11 +298,11 @@ function openPopup(view: EditorView, headingLineNumber: number, currentLevel: nu
     let left = anchorRect.right + 4;
     let top = anchorRect.top;
 
-    if (left + popupRect.width > window.innerWidth) {
+    if (left + popupRect.width > viewWindow.innerWidth) {
         left = anchorRect.left - popupRect.width - 4;
     }
-    if (top + popupRect.height > window.innerHeight) {
-        top = window.innerHeight - popupRect.height - 8;
+    if (top + popupRect.height > viewWindow.innerHeight) {
+        top = viewWindow.innerHeight - popupRect.height - 8;
     }
 
     popup.style.left = `${Math.max(0, left)}px`;
@@ -302,11 +322,11 @@ function openPopup(view: EditorView, headingLineNumber: number, currentLevel: nu
 
     // Delay adding outside-click listener so the current click doesn't immediately close it
     setTimeout(() => {
-        document.addEventListener('mousedown', outsideClickHandler);
-        document.addEventListener('keydown', escapeHandler);
+        doc.addEventListener('mousedown', outsideClickHandler);
+        doc.addEventListener('keydown', escapeHandler);
     }, 0);
 
-    activePopup = { el: popup, outsideClickHandler, escapeHandler, blurCleanup };
+    activePopup = { doc, el: popup, outsideClickHandler, escapeHandler, blurCleanup };
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +421,9 @@ export default function (context: ContentScriptContext) {
                 return;
             }
 
-            ensureStylesInjected();
+            const editor = editorControl.editor as EditorView;
+
+            ensureStylesInjected(editor);
 
             // Fetch initial config from the main plugin
             let config: Config = DEFAULT_CONFIG;
@@ -420,7 +442,6 @@ export default function (context: ContentScriptContext) {
 
             // Command for live config updates pushed from the main plugin
             editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
-                const editor = editorControl.editor as EditorView;
                 editor.dispatch({
                     effects: gutterCompartment.reconfigure(createGutterExtension(newConfig)),
                 });
