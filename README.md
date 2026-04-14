@@ -1,5 +1,8 @@
-# Joplin Plugin
+> [!note]
+> This plugin was created entirely with AI tools
 
-This is your new Joplin plugin. It is suggested that you use this README file to document your plugin.
+# Heading Levels
 
-For information on how to build or publish the plugin, please see [GENERATOR_DOC.md](./GENERATOR_DOC.md)
+Displays heading levels in the markdown editor's gutter (h1, h2, etc...) and provides a menu for quickly switching heading levels.
+
+Only works in the markdown editor (does not effect markdown viewer or rich text editor).
