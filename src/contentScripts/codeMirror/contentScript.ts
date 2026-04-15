@@ -1,6 +1,16 @@
-import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import {
+    EditorView,
+    gutter,
+    GutterMarker,
+    repositionTooltips,
+    showTooltip,
+    tooltips,
+    ViewPlugin,
+    type Tooltip,
+    type ViewUpdate,
+} from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Compartment, RangeSetBuilder, RangeSet } from '@codemirror/state';
+import { Compartment, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
 import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
 import { calculateGutterOffset } from './layoutHelpers';
@@ -62,8 +72,7 @@ const STYLES = `
     color: var(--joplin-color, inherit);
     background: var(--joplin-background-color-hover3, rgba(128,128,128,0.12));
 }
-.hl-popup {
-    position: fixed;
+.cm-tooltip.hl-heading-menu {
     z-index: 9999;
     background: var(--joplin-background-color, #fff);
     border: 1px solid var(--joplin-divider-color, #ccc);
@@ -73,8 +82,9 @@ const STYLES = `
     min-width: 120px;
     font-family: inherit;
     font-size: 13px;
+    overflow: hidden;
 }
-.hl-popup-item {
+.hl-heading-menu-item {
     padding: 6px 14px;
     cursor: pointer;
     color: var(--joplin-color, inherit);
@@ -82,13 +92,13 @@ const STYLES = `
     align-items: center;
     gap: 8px;
 }
-.hl-popup-item:hover {
+.hl-heading-menu-item:hover {
     background: var(--joplin-background-color-hover3, rgba(128,128,128,0.15));
 }
-.hl-popup-item-current {
+.hl-heading-menu-item-current {
     font-weight: 700;
 }
-.hl-popup-item-current::after {
+.hl-heading-menu-item-current::after {
     content: '✓';
     margin-left: auto;
     font-size: 0.9em;
@@ -237,97 +247,107 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
 }
 
 // ---------------------------------------------------------------------------
-// Popup
+// Heading menu tooltip
 // ---------------------------------------------------------------------------
 
-interface PopupState {
-    doc: Document;
-    el: HTMLElement;
-    outsideClickHandler: (e: MouseEvent) => void;
-    escapeHandler: (e: KeyboardEvent) => void;
-    blurCleanup: () => void;
+interface HeadingMenuState {
+    pos: number;
+    headingLineNumber: number;
+    currentLevel: number;
 }
 
-let activePopup: PopupState | null = null;
+const openHeadingMenuEffect = StateEffect.define<HeadingMenuState>();
+const closeHeadingMenuEffect = StateEffect.define<null>();
 
-function closePopup(): void {
-    if (!activePopup) return;
-    const { doc, el, outsideClickHandler, escapeHandler, blurCleanup } = activePopup;
-    el.remove();
-    doc.removeEventListener('mousedown', outsideClickHandler);
-    doc.removeEventListener('keydown', escapeHandler);
-    blurCleanup();
-    activePopup = null;
+function closeHeadingMenu(view: EditorView): void {
+    view.dispatch({ effects: closeHeadingMenuEffect.of(null) });
 }
 
-function openPopup(view: EditorView, headingLineNumber: number, currentLevel: number, anchorEl: HTMLElement): void {
-    closePopup();
+function createHeadingMenuTooltip(menuState: HeadingMenuState): Tooltip {
+    return {
+        pos: menuState.pos,
+        above: false,
+        create(view) {
+            const doc = getViewDocument(view);
+            const viewWindow = getViewWindow(view);
+            const menu = doc.createElement('div');
+            menu.className = 'hl-heading-menu';
+            menu.setAttribute('role', 'menu');
 
-    const doc = getViewDocument(view);
-    const viewWindow = getViewWindow(view);
+            for (let l = 1; l <= 6; l++) {
+                const item = doc.createElement('div');
+                item.className = 'hl-heading-menu-item';
+                if (l === menuState.currentLevel) item.classList.add('hl-heading-menu-item-current');
+                item.textContent = `Heading ${l}`;
+                item.setAttribute('role', 'menuitem');
+                const targetLevel = l;
+                item.addEventListener('pointerdown', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    applyHeadingChange(view, menuState.headingLineNumber, targetLevel);
+                });
+                menu.appendChild(item);
+            }
 
-    const popup = doc.createElement('div');
-    popup.className = 'hl-popup';
-    popup.setAttribute('role', 'menu');
+            const outsidePointerDownHandler = (event: PointerEvent) => {
+                if (!menu.contains(event.target as Node)) {
+                    closeHeadingMenu(view);
+                }
+            };
+            const escapeHandler = (event: KeyboardEvent) => {
+                if (event.key === 'Escape') {
+                    closeHeadingMenu(view);
+                }
+            };
+            const handleViewportChange = () => repositionTooltips(view);
 
-    for (let l = 1; l <= 6; l++) {
-        const item = doc.createElement('div');
-        item.className = 'hl-popup-item';
-        if (l === currentLevel) item.classList.add('hl-popup-item-current');
-        item.textContent = `Heading ${l}`;
-        item.setAttribute('role', 'menuitem');
-        const targetLevel = l;
-        item.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            applyHeadingChange(view, headingLineNumber, targetLevel);
-            closePopup();
-        });
-        popup.appendChild(item);
-    }
+            return {
+                dom: menu,
+                offset: { x: 8, y: 4 },
+                mount() {
+                    doc.addEventListener('pointerdown', outsidePointerDownHandler, true);
+                    doc.addEventListener('keydown', escapeHandler);
+                    viewWindow.visualViewport?.addEventListener('resize', handleViewportChange);
+                    viewWindow.visualViewport?.addEventListener('scroll', handleViewportChange);
+                },
+                destroy() {
+                    doc.removeEventListener('pointerdown', outsidePointerDownHandler, true);
+                    doc.removeEventListener('keydown', escapeHandler);
+                    viewWindow.visualViewport?.removeEventListener('resize', handleViewportChange);
+                    viewWindow.visualViewport?.removeEventListener('scroll', handleViewportChange);
+                },
+            };
+        },
+    };
+}
 
-    // Position off-screen first to measure dimensions
-    popup.style.position = 'fixed';
-    popup.style.left = '-9999px';
-    popup.style.top = '-9999px';
-    doc.body.appendChild(popup);
-
-    const popupRect = popup.getBoundingClientRect();
-    const anchorRect = anchorEl.getBoundingClientRect();
-
-    let left = anchorRect.right + 4;
-    let top = anchorRect.top;
-
-    if (left + popupRect.width > viewWindow.innerWidth) {
-        left = anchorRect.left - popupRect.width - 4;
-    }
-    if (top + popupRect.height > viewWindow.innerHeight) {
-        top = viewWindow.innerHeight - popupRect.height - 8;
-    }
-
-    popup.style.left = `${Math.max(0, left)}px`;
-    popup.style.top = `${Math.max(0, top)}px`;
-
-    const outsideClickHandler = (e: MouseEvent) => {
-        if (!popup.contains(e.target as Node)) {
-            closePopup();
+const headingMenuStateField = StateField.define<HeadingMenuState | null>({
+    create() {
+        return null;
+    },
+    update(value, tr) {
+        for (const effect of tr.effects) {
+            if (effect.is(openHeadingMenuEffect)) {
+                return effect.value;
+            }
         }
-    };
-    const escapeHandler = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') closePopup();
-    };
-    const blurHandler = () => closePopup();
-    view.dom.addEventListener('blur', blurHandler, { capture: true });
-    const blurCleanup = () => view.dom.removeEventListener('blur', blurHandler, { capture: true });
 
-    // Delay adding outside-click listener so the current click doesn't immediately close it
-    setTimeout(() => {
-        doc.addEventListener('mousedown', outsideClickHandler);
-        doc.addEventListener('keydown', escapeHandler);
-    }, 0);
+        if (
+            tr.effects.some((effect) => effect.is(closeHeadingMenuEffect)) ||
+            tr.docChanged ||
+            tr.selection !== undefined
+        ) {
+            return null;
+        }
 
-    activePopup = { doc, el: popup, outsideClickHandler, escapeHandler, blurCleanup };
-}
+        return value;
+    },
+    provide: (field) =>
+        showTooltip.compute([field], (state) => {
+            const menuState = state.field(field);
+            return menuState ? createHeadingMenuTooltip(menuState) : null;
+        }),
+});
 
 // ---------------------------------------------------------------------------
 // Heading change application
@@ -343,7 +363,10 @@ function applyHeadingChange(view: EditorView, headingLineNumber: number, newLeve
 
     const lineIndex = headingLineNumber - 1;
     const heading = detectHeadingAtLine(lines, lineIndex);
-    if (!heading || heading.level === newLevel) return;
+    if (!heading || heading.level === newLevel) {
+        closeHeadingMenu(view);
+        return;
+    }
 
     const newLines = rewriteHeading(lines, lineIndex, newLevel);
 
@@ -372,14 +395,21 @@ function applyHeadingChange(view: EditorView, headingLineNumber: number, newLeve
         }
     }
 
-    view.dispatch({ changes: { from, to, insert } });
+    view.dispatch({
+        changes: { from, to, insert },
+        effects: closeHeadingMenuEffect.of(null),
+    });
 }
 
-function moveCursorToHeadingLine(view: EditorView, lineFrom: number): void {
+function openHeadingMenu(view: EditorView, lineFrom: number, headingLineNumber: number, currentLevel: number): void {
     view.dispatch({
         selection: { anchor: lineFrom },
+        effects: openHeadingMenuEffect.of({
+            pos: lineFrom,
+            headingLineNumber,
+            currentLevel,
+        }),
     });
-    view.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -409,8 +439,7 @@ function createGutterExtension(config: Config) {
 
                 const level = parseInt(target.getAttribute('data-level') ?? '1');
                 const lineNumber = view.state.doc.lineAt(line.from).number;
-                moveCursorToHeadingLine(view, line.from);
-                openPopup(view, lineNumber, level, target);
+                openHeadingMenu(view, line.from, lineNumber, level);
                 return true;
             },
         },
@@ -446,7 +475,12 @@ export default function (context: ContentScriptContext) {
 
             const gutterCompartment = new Compartment();
 
-            editorControl.addExtension([gutterCompartment.of(createGutterExtension(config)), gutterAlignmentExtension]);
+            editorControl.addExtension([
+                gutterCompartment.of(createGutterExtension(config)),
+                gutterAlignmentExtension,
+                headingMenuStateField,
+                tooltips(),
+            ]);
 
             // Command for live config updates pushed from the main plugin
             editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
