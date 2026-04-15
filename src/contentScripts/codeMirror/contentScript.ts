@@ -80,7 +80,7 @@ const STYLES = `
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     padding: 4px 0;
     min-width: 120px;
-    font-family: inherit;
+    font-family: system-ui, sans-serif;
     font-size: 13px;
     overflow: hidden;
 }
@@ -101,7 +101,7 @@ const STYLES = `
 .hl-heading-menu-item-current::after {
     content: '✓';
     margin-left: auto;
-    font-size: 0.9em;
+    font-size: 1.2em;
 }
 `;
 
