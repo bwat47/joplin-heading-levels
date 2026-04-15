@@ -375,6 +375,13 @@ function applyHeadingChange(view: EditorView, headingLineNumber: number, newLeve
     view.dispatch({ changes: { from, to, insert } });
 }
 
+function moveCursorToHeadingLine(view: EditorView, lineFrom: number): void {
+    view.dispatch({
+        selection: { anchor: lineFrom },
+    });
+    view.focus();
+}
+
 // ---------------------------------------------------------------------------
 // Gutter extension factory
 // ---------------------------------------------------------------------------
@@ -402,6 +409,7 @@ function createGutterExtension(config: Config) {
 
                 const level = parseInt(target.getAttribute('data-level') ?? '1');
                 const lineNumber = view.state.doc.lineAt(line.from).number;
+                moveCursorToHeadingLine(view, line.from);
                 openPopup(view, lineNumber, level, target);
                 return true;
             },
