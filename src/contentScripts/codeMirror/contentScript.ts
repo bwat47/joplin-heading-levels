@@ -10,7 +10,7 @@ import {
     type ViewUpdate,
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Compartment, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
+import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
 import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
 import { calculateGutterOffset } from './layoutHelpers';
@@ -31,6 +31,12 @@ interface Config {
 }
 
 const DEFAULT_CONFIG: Config = { gutterPlacement: 'after' };
+
+const configFacet = Facet.define<Config, Config>({
+    combine(configs) {
+        return configs.length > 0 ? configs[configs.length - 1] : DEFAULT_CONFIG;
+    },
+});
 
 // ---------------------------------------------------------------------------
 // Styles injected once into the webview document
@@ -218,6 +224,34 @@ class GutterAlignmentPlugin {
 }
 
 const gutterAlignmentExtension = ViewPlugin.fromClass(GutterAlignmentPlugin);
+
+class GutterPlacementPlugin {
+    constructor(private readonly view: EditorView) {
+        this.syncPlacementClass(this.view.state.facet(configFacet));
+    }
+
+    update(update: ViewUpdate): void {
+        const previousConfig = update.startState.facet(configFacet);
+        const nextConfig = update.state.facet(configFacet);
+
+        if (
+            previousConfig.gutterPlacement !== nextConfig.gutterPlacement ||
+            update.geometryChanged ||
+            update.viewportChanged
+        ) {
+            this.syncPlacementClass(nextConfig);
+        }
+    }
+
+    private syncPlacementClass(config: Config): void {
+        const gutterElement = this.view.scrollDOM.querySelector<HTMLElement>('.hl-gutter');
+        if (!gutterElement) return;
+
+        gutterElement.classList.toggle('hl-gutter-before', config.gutterPlacement === 'before');
+    }
+}
+
+const gutterPlacementExtension = ViewPlugin.fromClass(GutterPlacementPlugin);
 
 // ---------------------------------------------------------------------------
 // Gutter marker
@@ -433,11 +467,9 @@ function openHeadingMenu(view: EditorView, lineFrom: number, headingLineNumber: 
 // Gutter extension factory
 // ---------------------------------------------------------------------------
 
-function createGutterExtension(config: Config) {
-    const gutterClass = config.gutterPlacement === 'before' ? 'hl-gutter hl-gutter-before' : 'hl-gutter';
-
+function createGutterExtension() {
     return gutter({
-        class: gutterClass,
+        class: 'hl-gutter',
         markers: buildHeadingMarkers,
         lineMarkerChange: (update) => update.docChanged || update.viewportChanged,
         domEventHandlers: {
@@ -490,11 +522,13 @@ export default function (context: ContentScriptContext) {
                 logger.warn('Could not fetch settings; using defaults.', e);
             }
 
-            const gutterCompartment = new Compartment();
+            const configCompartment = new Compartment();
 
             editorControl.addExtension([
-                gutterCompartment.of(createGutterExtension(config)),
+                configCompartment.of(configFacet.of(config)),
+                createGutterExtension(),
                 gutterAlignmentExtension,
+                gutterPlacementExtension,
                 headingMenuStateField,
                 tooltips(),
             ]);
@@ -502,7 +536,7 @@ export default function (context: ContentScriptContext) {
             // Command for live config updates pushed from the main plugin
             editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
                 editor.dispatch({
-                    effects: gutterCompartment.reconfigure(createGutterExtension(newConfig)),
+                    effects: configCompartment.reconfigure(configFacet.of(newConfig)),
                 });
             });
         },
