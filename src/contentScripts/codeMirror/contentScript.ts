@@ -103,6 +103,23 @@ const STYLES = `
     margin-left: auto;
     font-size: 1.2em;
 }
+/* Style built-in line numbers consistently with the heading gutter markers. */
+.cm-lineNumbers .cm-gutterElement {
+    font-size: 0.75em;
+    font-weight: 500;
+    color: var(--joplin-color-faded, #888);
+    opacity: 0.6;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 6px;
+    user-select: none;
+    transition: opacity 0.15s;
+}
+.cm-lineNumbers .cm-gutterElement.cm-activeLineGutter {
+    opacity: 1;
+    color: var(--joplin-color, inherit);
+}
 `;
 
 function ensureStylesInjected(view: EditorView): void {
