@@ -7,9 +7,8 @@ describe('calculateGutterOffset', () => {
                 scrollerLeft: 0,
                 contentLeft: 240,
                 gutterWidth: 36,
-                contentPaddingStart: 8,
             })
-        ).toBe(212);
+        ).toBe(204);
     });
 
     it('returns zero when the content already starts at the gutter edge', () => {
@@ -18,9 +17,18 @@ describe('calculateGutterOffset', () => {
                 scrollerLeft: 0,
                 contentLeft: 28,
                 gutterWidth: 36,
-                contentPaddingStart: 0,
             })
         ).toBe(0);
+    });
+
+    it('does not shift the gutter into the line padding area', () => {
+        expect(
+            calculateGutterOffset({
+                scrollerLeft: 0,
+                contentLeft: 56,
+                gutterWidth: 28,
+            })
+        ).toBe(28);
     });
 
     it('rounds fractional browser layout values', () => {
@@ -29,9 +37,8 @@ describe('calculateGutterOffset', () => {
                 scrollerLeft: 12.4,
                 contentLeft: 154.8,
                 gutterWidth: 35.6,
-                contentPaddingStart: 7.9,
             })
-        ).toBe(115);
+        ).toBe(107);
     });
 
     it('guards against invalid layout measurements', () => {
@@ -40,7 +47,6 @@ describe('calculateGutterOffset', () => {
                 scrollerLeft: 0,
                 contentLeft: Number.NaN,
                 gutterWidth: 36,
-                contentPaddingStart: 8,
             })
         ).toBe(0);
     });

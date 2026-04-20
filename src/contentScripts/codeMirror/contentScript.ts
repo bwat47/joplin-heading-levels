@@ -16,7 +16,6 @@ import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
 import { calculateGutterOffset } from './layoutHelpers';
 import {
     cancelViewAnimationFrame,
-    getDocumentWindow,
     getViewDocument,
     getViewResizeObserver,
     getViewWindow,
@@ -139,14 +138,6 @@ function ensureStylesInjected(view: EditorView): void {
     doc.head.appendChild(style);
 }
 
-function getContentPaddingStart(contentEl: HTMLElement): number {
-    const computedStyle = getDocumentWindow(contentEl.ownerDocument).getComputedStyle(contentEl);
-    const padding = computedStyle.paddingInlineStart || computedStyle.paddingLeft || '0';
-    const value = Number.parseFloat(padding);
-
-    return Number.isFinite(value) ? value : 0;
-}
-
 function syncGutterAlignment(view: EditorView): void {
     const gutterWrapper = view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
     if (!gutterWrapper) return;
@@ -158,7 +149,6 @@ function syncGutterAlignment(view: EditorView): void {
         scrollerLeft: scrollerRect.left,
         contentLeft: contentRect.left,
         gutterWidth: gutterRect.width,
-        contentPaddingStart: getContentPaddingStart(view.contentDOM),
     });
     const nextLeft = `${nextOffset}px`;
 
