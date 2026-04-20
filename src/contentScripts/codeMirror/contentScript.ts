@@ -12,7 +12,7 @@ import {
 import { syntaxTree } from '@codemirror/language';
 import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
-import { detectHeadingAtLine, rewriteHeading } from './headingHelpers';
+import { detectHeadingAtLine, removeHeading, rewriteHeading } from './headingHelpers';
 import { calculateGutterOffset } from './layoutHelpers';
 import {
     cancelViewAnimationFrame,
@@ -330,6 +330,17 @@ function createHeadingMenuTooltip(menuState: HeadingMenuState): Tooltip {
                 menu.appendChild(item);
             }
 
+            const paragraphItem = doc.createElement('div');
+            paragraphItem.className = 'hl-heading-menu-item';
+            paragraphItem.textContent = 'Paragraph';
+            paragraphItem.setAttribute('role', 'menuitem');
+            paragraphItem.addEventListener('pointerdown', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                applyHeadingChange(view, menuState.headingLineNumber, null);
+            });
+            menu.appendChild(paragraphItem);
+
             const outsidePointerDownHandler = (event: PointerEvent) => {
                 if (!menu.contains(event.target as Node)) {
                     closeHeadingMenu(view);
@@ -394,7 +405,7 @@ const headingMenuStateField = StateField.define<HeadingMenuState | null>({
 // Heading change application
 // ---------------------------------------------------------------------------
 
-function applyHeadingChange(view: EditorView, headingLineNumber: number, newLevel: number): void {
+function applyHeadingChange(view: EditorView, headingLineNumber: number, newLevel: number | null): void {
     const doc = view.state.doc;
 
     const lines: string[] = [];
@@ -404,18 +415,30 @@ function applyHeadingChange(view: EditorView, headingLineNumber: number, newLeve
 
     const lineIndex = headingLineNumber - 1;
     const heading = detectHeadingAtLine(lines, lineIndex);
-    if (!heading || heading.level === newLevel) {
+    if (!heading || (newLevel !== null && heading.level === newLevel)) {
         closeHeadingMenu(view);
         return;
     }
 
-    const newLines = rewriteHeading(lines, lineIndex, newLevel);
+    const newLines = newLevel === null ? removeHeading(lines, lineIndex) : rewriteHeading(lines, lineIndex, newLevel);
 
     let from: number;
     let to: number;
     let insert: string;
 
-    if (heading.type === 'atx') {
+    if (newLevel === null) {
+        const textDocLine = doc.line(headingLineNumber);
+        if (heading.type === 'atx') {
+            from = textDocLine.from;
+            to = textDocLine.to;
+            insert = newLines[lineIndex];
+        } else {
+            const underlineDocLine = doc.line(headingLineNumber + 1);
+            from = textDocLine.from;
+            to = underlineDocLine.to;
+            insert = newLines[lineIndex];
+        }
+    } else if (heading.type === 'atx') {
         const docLine = doc.line(headingLineNumber);
         from = docLine.from;
         to = docLine.to;

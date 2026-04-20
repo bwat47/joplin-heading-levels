@@ -1,4 +1,10 @@
-import { parseAtxHeading, parseSetextHeading, detectHeadingAtLine, rewriteHeading } from './headingHelpers';
+import {
+    parseAtxHeading,
+    parseSetextHeading,
+    detectHeadingAtLine,
+    rewriteHeading,
+    removeHeading,
+} from './headingHelpers';
 
 describe('parseAtxHeading', () => {
     it('parses H1 through H6', () => {
@@ -166,5 +172,28 @@ describe('rewriteHeading – non-heading lines', () => {
     it('returns same array reference for out-of-bounds index', () => {
         const lines = ['text'];
         expect(rewriteHeading(lines, 5, 2)).toBe(lines);
+    });
+});
+
+describe('removeHeading', () => {
+    it('removes ATX heading markers and the required separator', () => {
+        expect(removeHeading(['### Heading'], 0)).toEqual(['Heading']);
+        expect(removeHeading(['##  Spaced'], 0)).toEqual([' Spaced']);
+    });
+
+    it('removes setext underline line and preserves heading text', () => {
+        expect(removeHeading(['My Heading', '---------', 'Next line'], 0)).toEqual(['My Heading', 'Next line']);
+    });
+
+    it('returns same array reference for non-heading line', () => {
+        const lines = ['Just some text'];
+        expect(removeHeading(lines, 0)).toBe(lines);
+    });
+
+    it('does not mutate the input array', () => {
+        const lines = ['# Heading', 'Next line'];
+        const original = [...lines];
+        removeHeading(lines, 0);
+        expect(lines).toEqual(original);
     });
 });

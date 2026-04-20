@@ -110,3 +110,29 @@ export function rewriteHeading(lines: string[], lineIndex: number, newLevel: num
 
     return result;
 }
+
+/**
+ * Remove heading formatting at `lineIndex`, returning a new lines array.
+ *
+ * Rules:
+ * - ATX headings drop the leading `#` markers and their required separator.
+ * - Setext headings keep the text line and remove the underline line.
+ *
+ * The input `lines` array is never mutated. When `lineIndex` is not a heading
+ * the original array reference is returned unchanged.
+ */
+export function removeHeading(lines: string[], lineIndex: number): string[] {
+    const heading = detectHeadingAtLine(lines, lineIndex);
+    if (!heading) return lines;
+
+    const result = lines.slice();
+    const line = lines[lineIndex];
+
+    if (heading.type === 'atx') {
+        result[lineIndex] = line.replace(/^#{1,6}(?:[ \t]|$)/, '');
+    } else {
+        result.splice(lineIndex + 1, 1);
+    }
+
+    return result;
+}
