@@ -18,11 +18,11 @@ function getGlobalWindow(): Window {
     return viewWindow;
 }
 
-export function getNodeDocument(node: Node): Document {
+function getNodeDocument(node: Node): Document {
     return node.ownerDocument ?? getGlobalDocument();
 }
 
-export function getDocumentWindow(doc: Document): Window {
+function getDocumentWindow(doc: Document): Window {
     return doc.defaultView ?? getGlobalWindow();
 }
 

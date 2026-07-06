@@ -6,7 +6,7 @@
  * can be unit-tested without a CM6 editor context.
  */
 
-export type HeadingType = 'atx' | 'setext';
+type HeadingType = 'atx' | 'setext';
 
 export interface HeadingInfo {
     level: number;
