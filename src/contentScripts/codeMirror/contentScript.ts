@@ -581,8 +581,6 @@ function createGutterExtension() {
     return gutter({
         class: 'hl-gutter',
         markers: buildHeadingMarkers,
-        lineMarkerChange: (update) =>
-            update.docChanged || update.viewportChanged || syntaxTree(update.startState) !== syntaxTree(update.state),
         domEventHandlers: {
             mousedown(_view, _line, event) {
                 const target = event.target as HTMLElement;
