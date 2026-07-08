@@ -288,6 +288,103 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
 }
 
 // ---------------------------------------------------------------------------
+// Content resize measurement
+//
+// CodeMirror only updates its internal height map during a measure pass. When
+// rendered content changes size without a transaction (for example, an image
+// embed loading after a note opens), the gutter can stay positioned against
+// stale line heights until something else causes a measure. This plugin nudges
+// CodeMirror to re-measure after note loads and content size changes.
+// ---------------------------------------------------------------------------
+
+const POST_LOAD_MEASURE_DELAYS_MS = [300, 1000];
+
+function isFullDocumentReplacement(update: ViewUpdate): boolean {
+    if (!update.docChanged) return false;
+
+    const previousLength = update.startState.doc.length;
+    let fullReplacement = false;
+    update.changes.iterChanges((fromA, toA) => {
+        if (fromA === 0 && toA === previousLength) {
+            fullReplacement = true;
+        }
+    });
+
+    return fullReplacement;
+}
+
+class GutterMeasurePlugin {
+    private frameHandle: number | null = null;
+
+    private postLoadTimerHandles: number[] = [];
+
+    private readonly resizeObserver: ResizeObserver | null;
+
+    private readonly viewWindow: Window;
+
+    constructor(private readonly view: EditorView) {
+        this.viewWindow = getViewWindow(view);
+        this.schedulePostLoadMeasures();
+
+        const ResizeObserverCtor = getViewResizeObserver(view);
+        if (ResizeObserverCtor) {
+            this.resizeObserver = new ResizeObserverCtor(() => {
+                this.scheduleMeasure();
+            });
+            this.resizeObserver.observe(view.contentDOM);
+        } else {
+            this.resizeObserver = null;
+        }
+    }
+
+    update(update: ViewUpdate): void {
+        if (isFullDocumentReplacement(update)) {
+            this.schedulePostLoadMeasures();
+        }
+    }
+
+    destroy(): void {
+        if (this.frameHandle !== null) {
+            cancelViewAnimationFrame(this.view, this.frameHandle);
+            this.frameHandle = null;
+        }
+
+        for (const handle of this.postLoadTimerHandles) {
+            this.viewWindow.clearTimeout(handle);
+        }
+        this.postLoadTimerHandles = [];
+        this.resizeObserver?.disconnect();
+    }
+
+    private scheduleMeasure(): void {
+        if (this.frameHandle !== null) return;
+
+        this.frameHandle = requestViewAnimationFrame(this.view, () => {
+            this.frameHandle = null;
+            this.view.requestMeasure();
+        });
+    }
+
+    private schedulePostLoadMeasures(): void {
+        for (const handle of this.postLoadTimerHandles) {
+            this.viewWindow.clearTimeout(handle);
+        }
+        this.postLoadTimerHandles = [];
+
+        this.scheduleMeasure();
+        for (const delay of POST_LOAD_MEASURE_DELAYS_MS) {
+            this.postLoadTimerHandles.push(
+                this.viewWindow.setTimeout(() => {
+                    this.scheduleMeasure();
+                }, delay)
+            );
+        }
+    }
+}
+
+const gutterMeasureExtension = ViewPlugin.fromClass(GutterMeasurePlugin);
+
+// ---------------------------------------------------------------------------
 // Heading menu tooltip
 // ---------------------------------------------------------------------------
 
@@ -543,6 +640,7 @@ export default function (context: ContentScriptContext) {
                 createGutterExtension(),
                 gutterAlignmentExtension,
                 gutterPlacementExtension,
+                gutterMeasureExtension,
                 headingMenuStateField,
                 tooltips(),
             ]);
