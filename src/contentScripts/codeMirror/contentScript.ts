@@ -13,7 +13,7 @@ import { syntaxTree } from '@codemirror/language';
 import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
 import { detectHeadingAtLine, removeHeading, rewriteHeading } from './headingHelpers';
-import { calculateGutterOffset } from './layoutHelpers';
+import { calculateGutterOffset, hasRoomForOverlaidGutter, type GutterOffsetInput } from './layoutHelpers';
 import {
     cancelViewAnimationFrame,
     getViewDocument,
@@ -138,27 +138,47 @@ function ensureStylesInjected(view: EditorView): void {
     doc.head.appendChild(style);
 }
 
-function syncGutterAlignment(view: EditorView): void {
-    const gutterWrapper = view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
-    if (!gutterWrapper) return;
+interface GutterMetrics extends GutterOffsetInput {
+    scrollerWidth: number;
+    contentWidth: number;
+}
 
+function measureGutterMetrics(view: EditorView, gutterWrapper: HTMLElement): GutterMetrics {
     const scrollerRect = view.scrollDOM.getBoundingClientRect();
     const contentRect = view.contentDOM.getBoundingClientRect();
     const gutterRect = gutterWrapper.getBoundingClientRect();
-    const nextOffset = calculateGutterOffset({
-        scrollerLeft: scrollerRect.left,
-        contentLeft: contentRect.left,
-        gutterWidth: gutterRect.width,
-    });
-    const nextLeft = `${nextOffset}px`;
 
-    if (gutterWrapper.style.left !== nextLeft) {
-        gutterWrapper.style.left = nextLeft;
-    }
+    return {
+        scrollerLeft: scrollerRect.left,
+        scrollerWidth: scrollerRect.width,
+        contentLeft: contentRect.left,
+        contentWidth: contentRect.width,
+        gutterWidth: gutterRect.width,
+    };
+}
+
+/**
+ * Identifies the layout the overlay decision was made for. Only the widths
+ * matter: the editor pane moving on screen cannot change whether the gutter
+ * fits beside the content, so the decision is only re-evaluated (which costs a
+ * forced reflow) when a width actually changes.
+ */
+function layoutKey(metrics: GutterMetrics, overlaid: boolean): string {
+    return [
+        Math.round(metrics.scrollerWidth),
+        Math.round(metrics.contentWidth),
+        Math.round(metrics.gutterWidth),
+        overlaid,
+    ].join('|');
 }
 
 class GutterAlignmentPlugin {
     private frameHandle: number | null = null;
+
+    /** True while the gutter is pulled out of the scroller's flex flow. */
+    private overlaid = false;
+
+    private appliedLayoutKey: string | null = null;
 
     private readonly resizeObserver: ResizeObserver | null;
 
@@ -199,6 +219,12 @@ class GutterAlignmentPlugin {
             this.frameHandle = null;
         }
 
+        const gutterWrapper = this.view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
+        if (gutterWrapper) {
+            gutterWrapper.style.left = '';
+            gutterWrapper.style.marginRight = '';
+        }
+
         this.resizeObserver?.disconnect();
         this.viewWindow.removeEventListener('resize', this.handleWindowResize);
     }
@@ -208,8 +234,50 @@ class GutterAlignmentPlugin {
 
         this.frameHandle = requestViewAnimationFrame(this.view, () => {
             this.frameHandle = null;
-            syncGutterAlignment(this.view);
+            this.sync();
         });
+    }
+
+    private sync(): void {
+        const gutterWrapper = this.view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
+        if (!gutterWrapper) return;
+
+        let metrics = measureGutterMetrics(this.view, gutterWrapper);
+
+        if (layoutKey(metrics, this.overlaid) !== this.appliedLayoutKey) {
+            metrics = this.chooseGutterPlacement(gutterWrapper, metrics);
+            this.appliedLayoutKey = layoutKey(metrics, this.overlaid);
+        }
+
+        const nextLeft = `${calculateGutterOffset(metrics)}px`;
+        if (gutterWrapper.style.left !== nextLeft) {
+            gutterWrapper.style.left = nextLeft;
+        }
+    }
+
+    /**
+     * Decide whether the gutter can be overlaid on the empty margin left of the
+     * content instead of taking flow width from it. The answer depends on where
+     * the content lands once the gutter is weightless, so this measures that
+     * state directly rather than predicting it, and falls back to the in-flow
+     * layout when the margin is too narrow.
+     */
+    private chooseGutterPlacement(gutterWrapper: HTMLElement, metrics: GutterMetrics): GutterMetrics {
+        this.setOverlaid(gutterWrapper, true, metrics.gutterWidth);
+        const overlaidMetrics = measureGutterMetrics(this.view, gutterWrapper);
+
+        if (hasRoomForOverlaidGutter(overlaidMetrics)) return overlaidMetrics;
+
+        this.setOverlaid(gutterWrapper, false, metrics.gutterWidth);
+        return measureGutterMetrics(this.view, gutterWrapper);
+    }
+
+    private setOverlaid(gutterWrapper: HTMLElement, overlaid: boolean, gutterWidth: number): void {
+        this.overlaid = overlaid;
+        // A negative end margin cancels the gutter's contribution to the flex
+        // layout without changing where it paints, so the content box keeps the
+        // width and centering it would have without a gutter.
+        gutterWrapper.style.marginRight = overlaid && Number.isFinite(gutterWidth) ? `${-gutterWidth}px` : '';
     }
 }
 
