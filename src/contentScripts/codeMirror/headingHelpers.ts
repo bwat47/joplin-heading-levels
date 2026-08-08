@@ -45,8 +45,8 @@ export function parseSetextHeading(line: string, underlineLine: string | undefin
     // Lines that are themselves ATX headings take precedence
     if (/^#{1,6}([ \t]|$)/.test(line)) return null;
 
-    if (/^={1,}\s*$/.test(underlineLine)) return { level: 1, type: 'setext' };
-    if (/^-{1,}\s*$/.test(underlineLine)) return { level: 2, type: 'setext' };
+    if (/^=+\s*$/.test(underlineLine)) return { level: 1, type: 'setext' };
+    if (/^-+\s*$/.test(underlineLine)) return { level: 2, type: 'setext' };
     return null;
 }
 
@@ -99,7 +99,7 @@ export function rewriteHeading(lines: string[], lineIndex: number, newLevel: num
         if (newLevel <= 2) {
             // Keep setext; swap underline character while preserving its length
             const underlineChar = newLevel === 1 ? '=' : '-';
-            const underlineLen = Math.max(underline.replace(/\s+$/, '').length, 3);
+            const underlineLen = Math.max(underline.trimEnd().length, 3);
             result[underlineIndex] = underlineChar.repeat(underlineLen);
         } else {
             // Convert to ATX; remove the underline line
