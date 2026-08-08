@@ -135,6 +135,11 @@ describe('rewriteHeading – setext', () => {
         expect(result[1]).toBe('---');
     });
 
+    it('excludes trailing whitespace from the preserved underline length', () => {
+        const result = rewriteHeading(['My Heading', '=====  \t'], 0, 2);
+        expect(result[1]).toBe('-----');
+    });
+
     it('converts setext H1 to ATX H3, removing underline line', () => {
         const result = rewriteHeading(['My Heading', '=========', 'Some text'], 0, 3);
         expect(result).toEqual(['### My Heading', 'Some text']);
