@@ -44,105 +44,101 @@ const configFacet = Facet.define<Config, Config>({
 });
 
 // ---------------------------------------------------------------------------
-// Styles injected once into the webview document
+// Theme
+//
+// Scoped to this editor instance and torn down with the extension, so nothing
+// leaks into the webview document. Selectors written bare are prefixed with the
+// generated theme class; selectors written as `&.cm-editor ...` additionally
+// anchor to the editor element, which raises specificity enough to win against
+// Joplin's own equally-specific gutter rules. That form is used only where we
+// override styling we do not own.
 // ---------------------------------------------------------------------------
 
-const STYLES = `
-/* Remove the gutter panel's background and separator so our markers sit
-   flush against the editor text with no visible column boundary. */
-.cm-editor .cm-gutters {
-    background-color: transparent;
-    border-right: none;
-}
-.hl-gutter {
-    background: transparent;
-    min-width: 2em;
-    padding: 0 2px 0 4px;
-}
-.hl-gutter-before {
-    order: -1;
-}
-.hl-gutter-marker {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.75em;
-    font-weight: 500;
-    line-height: 1;
-    height: 100%;
-    padding: 0 2px;
-    border-radius: 3px;
-    cursor: pointer;
-    color: var(--joplin-color-faded, #888);
-    opacity: 0.6;
-    user-select: none;
-    transition: opacity 0.15s;
-}
-.hl-gutter-marker:hover {
-    opacity: 1;
-    color: var(--joplin-color, inherit);
-    background: var(--joplin-background-color-hover3, rgba(128,128,128,0.12));
-}
-.cm-tooltip.hl-heading-menu {
-    z-index: 9999;
-    background: var(--joplin-background-color, #fff);
-    border: 1px solid var(--joplin-divider-color, #ccc);
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    padding: 4px 0;
-    min-width: 120px;
-    font-family: system-ui, sans-serif;
-    font-size: 13px;
-    overflow: hidden;
-}
-.hl-heading-menu-item {
-    padding: 6px 14px;
-    cursor: pointer;
-    color: var(--joplin-color, inherit);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.hl-heading-menu-item:hover {
-    background: var(--joplin-background-color-hover3, rgba(128,128,128,0.15));
-}
-.hl-heading-menu-item-current {
-    font-weight: 700;
-}
-.hl-heading-menu-item-current::after {
-    content: '✓';
-    margin-left: auto;
-    font-size: 1.2em;
-}
-/* Style built-in line numbers consistently with the heading gutter markers. */
-.cm-lineNumbers .cm-gutterElement {
-    font-size: 0.75em;
-    font-weight: 500;
-    color: var(--joplin-color-faded, #888);
-    opacity: 0.6;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding-right: 6px;
-    user-select: none;
-    transition: opacity 0.15s;
-}
-.cm-lineNumbers .cm-gutterElement.cm-activeLineGutter {
-    opacity: 1;
-    color: var(--joplin-color, inherit);
-}
-`;
-
-function ensureStylesInjected(view: EditorView): void {
-    const doc = getViewDocument(view);
-
-    if (doc.getElementById('hl-plugin-styles')) return;
-
-    const style = doc.createElement('style');
-    style.id = 'hl-plugin-styles';
-    style.textContent = STYLES;
-    doc.head.appendChild(style);
-}
+const headingLevelsTheme = EditorView.theme({
+    // Remove the gutter panel's background and separator so our markers sit
+    // flush against the editor text with no visible column boundary.
+    '&.cm-editor .cm-gutters': {
+        backgroundColor: 'transparent',
+        borderRight: 'none',
+    },
+    '.hl-gutter': {
+        background: 'transparent',
+        minWidth: '2em',
+        padding: '0 2px 0 4px',
+    },
+    '.hl-gutter-before': {
+        order: -1,
+    },
+    '.hl-gutter-marker': {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '0.75em',
+        fontWeight: '500',
+        lineHeight: '1',
+        height: '100%',
+        padding: '0 2px',
+        borderRadius: '3px',
+        cursor: 'pointer',
+        color: 'var(--joplin-color-faded, #888)',
+        opacity: 0.6,
+        userSelect: 'none',
+        transition: 'opacity 0.15s',
+        '&:hover': {
+            opacity: 1,
+            color: 'var(--joplin-color, inherit)',
+            background: 'var(--joplin-background-color-hover3, rgba(128,128,128,0.12))',
+        },
+    },
+    '.cm-tooltip.hl-heading-menu': {
+        zIndex: 9999,
+        background: 'var(--joplin-background-color, #fff)',
+        border: '1px solid var(--joplin-divider-color, #ccc)',
+        borderRadius: '4px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+        padding: '4px 0',
+        minWidth: '120px',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '13px',
+        overflow: 'hidden',
+    },
+    '.hl-heading-menu-item': {
+        padding: '6px 14px',
+        cursor: 'pointer',
+        color: 'var(--joplin-color, inherit)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        '&:hover': {
+            background: 'var(--joplin-background-color-hover3, rgba(128,128,128,0.15))',
+        },
+    },
+    '.hl-heading-menu-item-current': {
+        fontWeight: '700',
+        '&::after': {
+            content: "'✓'",
+            marginLeft: 'auto',
+            fontSize: '1.2em',
+        },
+    },
+    // Style built-in line numbers consistently with the heading gutter markers.
+    '&.cm-editor .cm-lineNumbers .cm-gutterElement': {
+        fontSize: '0.75em',
+        fontWeight: '500',
+        color: 'var(--joplin-color-faded, #888)',
+        opacity: 0.6,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        paddingRight: '6px',
+        userSelect: 'none',
+        transition: 'opacity 0.15s',
+        '&.cm-activeLineGutter': {
+            opacity: 1,
+            color: 'var(--joplin-color, inherit)',
+        },
+    },
+});
 
 interface GutterMetrics extends GutterOffsetInput {
     scrollerWidth: number;
@@ -653,8 +649,6 @@ export default function (context: ContentScriptContext) {
 
             const editor = editorControl.editor as EditorView;
 
-            ensureStylesInjected(editor);
-
             // Fetch initial config from the main plugin
             let config: Config = DEFAULT_CONFIG;
             try {
@@ -670,6 +664,7 @@ export default function (context: ContentScriptContext) {
 
             editorControl.addExtension([
                 configCompartment.of(configFacet.of(config)),
+                headingLevelsTheme,
                 createGutterExtension(),
                 gutterAlignmentExtension,
                 gutterPlacementExtension,
