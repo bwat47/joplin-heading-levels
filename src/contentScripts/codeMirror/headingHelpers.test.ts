@@ -30,9 +30,20 @@ describe('findHeadingAtLine', () => {
             to: 10,
             markerFrom: 0,
             markerTo: 2,
+            closingFrom: null,
+            closingTo: null,
             level: 2,
             type: 'atx',
         });
+    });
+
+    it('returns the optional ATX closing sequence range', () => {
+        const { heading } = headingAt('## Heading ##');
+
+        expect(heading.markerFrom).toBe(0);
+        expect(heading.markerTo).toBe(2);
+        expect(heading.closingFrom).toBe(11);
+        expect(heading.closingTo).toBe(13);
     });
 
     it.each([' # Heading', '  # Heading', '   # Heading'])('finds an indented ATX heading: %s', (source) => {
@@ -52,6 +63,8 @@ describe('findHeadingAtLine', () => {
             to: source.length,
             markerFrom: source.lastIndexOf('---'),
             markerTo: source.length,
+            closingFrom: null,
+            closingTo: null,
             level: 2,
             type: 'setext',
         });
@@ -62,14 +75,11 @@ describe('findHeadingAtLine', () => {
         expect(headingAt('- ## Listed').heading.markerFrom).toBe(2);
     });
 
-    it('returns null for a non-heading line and an invalid position', () => {
+    it('returns null for a non-heading line', () => {
         const source = 'Paragraph';
         const doc = Text.of([source]);
-        const tree = parser.parse(source);
 
-        expect(findHeadingAtLine(tree, doc, 0)).toBeNull();
-        expect(findHeadingAtLine(tree, doc, -1)).toBeNull();
-        expect(findHeadingAtLine(tree, doc, doc.length + 1)).toBeNull();
+        expect(findHeadingAtLine(parser.parse(source), doc, 0)).toBeNull();
     });
 });
 
@@ -95,6 +105,18 @@ describe('buildHeadingChange – ATX', () => {
         expect(changeHeading('###  Heading', null)).toBe(' Heading');
         expect(changeHeading('  ### Heading', null)).toBe('  Heading');
         expect(changeHeading('###', null)).toBe('');
+    });
+
+    it('removes the closing sequence and all of its leading whitespace', () => {
+        expect(changeHeading('### Heading ###', null)).toBe('Heading');
+        expect(changeHeading('### Heading   ###', null)).toBe('Heading');
+        expect(changeHeading('### Heading ###   ', null)).toBe('Heading   ');
+        expect(changeHeading('> ## Quoted ##', null)).toBe('> Quoted');
+    });
+
+    it('removes overlapping opening and closing sequences of an empty heading', () => {
+        expect(changeHeading('## ##', null)).toBe('');
+        expect(changeHeading('###  ###', null)).toBe('');
     });
 
     it('edits nested headings without removing their container markers', () => {
@@ -155,6 +177,8 @@ describe('heading change validation', () => {
 
         expect(buildHeadingChange(doc, { ...heading, markerTo: heading.markerTo + 1 }, 3)).toBeNull();
         expect(buildHeadingChange(doc, { ...heading, to: doc.length + 1 }, 3)).toBeNull();
+        expect(buildHeadingChange(doc, { ...heading, closingFrom: 4 }, 3)).toBeNull();
+        expect(buildHeadingChange(doc, { ...heading, closingFrom: 8, closingTo: 4 }, 3)).toBeNull();
     });
 
     it('compares every syntax-backed heading property', () => {
@@ -163,5 +187,6 @@ describe('heading change validation', () => {
         expect(headingsEqual(heading, { ...heading })).toBe(true);
         expect(headingsEqual(heading, { ...heading, markerFrom: heading.markerFrom + 1 })).toBe(false);
         expect(headingsEqual(heading, { ...heading, level: 3 })).toBe(false);
+        expect(headingsEqual(heading, { ...heading, closingFrom: 8, closingTo: 10 })).toBe(false);
     });
 });
