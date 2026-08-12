@@ -1,204 +1,210 @@
-import {
-    parseAtxHeading,
-    parseSetextHeading,
-    detectHeadingAtLine,
-    rewriteHeading,
-    removeHeading,
-} from './headingHelpers';
+import { EditorState, Text, type ChangeSpec } from '@codemirror/state';
+import { parser } from '@lezer/markdown';
+import { buildHeadingChange, findHeadingAtLine, headingsEqual, type HeadingInfo } from './headingHelpers';
 
-describe('parseAtxHeading', () => {
-    it('parses H1 through H6', () => {
-        expect(parseAtxHeading('# H1')).toEqual({ level: 1, type: 'atx' });
-        expect(parseAtxHeading('## H2')).toEqual({ level: 2, type: 'atx' });
-        expect(parseAtxHeading('### H3')).toEqual({ level: 3, type: 'atx' });
-        expect(parseAtxHeading('###### H6')).toEqual({ level: 6, type: 'atx' });
+function headingAt(source: string, lineNumber = 1): { doc: Text; heading: HeadingInfo } {
+    const doc = Text.of(source.split('\n'));
+    const heading = findHeadingAtLine(parser.parse(source), doc, doc.line(lineNumber).from);
+    if (!heading) throw new Error(`Expected a heading on line ${lineNumber}: ${JSON.stringify(source)}`);
+    return { doc, heading };
+}
+
+function applyChange(source: string, change: ChangeSpec): string {
+    const state = EditorState.create({ doc: source });
+    return state.update({ changes: change }).state.doc.toString();
+}
+
+function changeHeading(source: string, newLevel: number | null, lineNumber = 1): string {
+    const { doc, heading } = headingAt(source, lineNumber);
+    const change = buildHeadingChange(doc, heading, newLevel);
+    if (!change) throw new Error(`Expected a heading change for ${JSON.stringify(source)}`);
+    return applyChange(source, change);
+}
+
+describe('findHeadingAtLine', () => {
+    it('returns ATX heading and marker ranges from the syntax tree', () => {
+        const { heading } = headingAt('## Heading');
+
+        expect(heading).toEqual({
+            from: 0,
+            to: 10,
+            markerFrom: 0,
+            markerTo: 2,
+            closingFrom: null,
+            closingTo: null,
+            level: 2,
+            type: 'atx',
+        });
     });
 
-    it('accepts ATX heading with no content after hashes', () => {
-        expect(parseAtxHeading('#')).toEqual({ level: 1, type: 'atx' });
-        expect(parseAtxHeading('##')).toEqual({ level: 2, type: 'atx' });
+    it('returns the optional ATX closing sequence range', () => {
+        const { heading } = headingAt('## Heading ##');
+
+        expect(heading.markerFrom).toBe(0);
+        expect(heading.markerTo).toBe(2);
+        expect(heading.closingFrom).toBe(11);
+        expect(heading.closingTo).toBe(13);
     });
 
-    it('returns null for seven or more hashes', () => {
-        expect(parseAtxHeading('####### H7')).toBeNull();
+    it.each([' # Heading', '  # Heading', '   # Heading'])('finds an indented ATX heading: %s', (source) => {
+        const { heading } = headingAt(source);
+
+        expect(heading.type).toBe('atx');
+        expect(heading.level).toBe(1);
+        expect(heading.markerFrom).toBe(source.indexOf('#'));
     });
 
-    it('returns null for non-heading lines', () => {
-        expect(parseAtxHeading('plain text')).toBeNull();
-        expect(parseAtxHeading('')).toBeNull();
-        expect(parseAtxHeading('  # indented')).toBeNull();
-    });
-});
+    it('returns a multiline setext heading and its underline marker', () => {
+        const source = 'First line\nsecond line\n---';
+        const { heading } = headingAt(source);
 
-describe('parseSetextHeading', () => {
-    it('detects H1 setext with equals underline', () => {
-        expect(parseSetextHeading('Hello', '===')).toEqual({ level: 1, type: 'setext' });
-        expect(parseSetextHeading('Hello', '=')).toEqual({ level: 1, type: 'setext' });
-        expect(parseSetextHeading('Hello', '===========')).toEqual({ level: 1, type: 'setext' });
-    });
-
-    it('detects H2 setext with dashes underline', () => {
-        expect(parseSetextHeading('Hello', '---')).toEqual({ level: 2, type: 'setext' });
-        expect(parseSetextHeading('Hello', '-----------')).toEqual({ level: 2, type: 'setext' });
+        expect(heading).toEqual({
+            from: 0,
+            to: source.length,
+            markerFrom: source.lastIndexOf('---'),
+            markerTo: source.length,
+            closingFrom: null,
+            closingTo: null,
+            level: 2,
+            type: 'setext',
+        });
     });
 
-    it('returns null when underline is undefined', () => {
-        expect(parseSetextHeading('Hello', undefined)).toBeNull();
+    it('finds headings nested in block quotes and lists by their document line', () => {
+        expect(headingAt('> # Quoted').heading.markerFrom).toBe(2);
+        expect(headingAt('- ## Listed').heading.markerFrom).toBe(2);
     });
 
-    it('returns null when text line is blank', () => {
-        expect(parseSetextHeading('', '===')).toBeNull();
-        expect(parseSetextHeading('   ', '===')).toBeNull();
-    });
+    it('returns null for a non-heading line', () => {
+        const source = 'Paragraph';
+        const doc = Text.of([source]);
 
-    it('returns null when text line is itself an ATX heading', () => {
-        expect(parseSetextHeading('# ATX', '===')).toBeNull();
-    });
-
-    it('returns null when underline is not all = or -', () => {
-        expect(parseSetextHeading('Hello', 'not underline')).toBeNull();
-        expect(parseSetextHeading('Hello', '=-=')).toBeNull();
-    });
-});
-
-describe('detectHeadingAtLine', () => {
-    it('detects ATX heading', () => {
-        expect(detectHeadingAtLine(['## Hello', 'text'], 0)).toEqual({ level: 2, type: 'atx' });
-    });
-
-    it('detects setext heading', () => {
-        expect(detectHeadingAtLine(['Hello', '===', 'text'], 0)).toEqual({ level: 1, type: 'setext' });
-    });
-
-    it('returns null for non-heading', () => {
-        expect(detectHeadingAtLine(['plain text'], 0)).toBeNull();
-    });
-
-    it('returns null for out-of-bounds index', () => {
-        expect(detectHeadingAtLine(['text'], 5)).toBeNull();
-    });
-});
-
-describe('rewriteHeading – ATX', () => {
-    it('rewrites H1 to H3, preserving content', () => {
-        expect(rewriteHeading(['# My Heading'], 0, 3)).toEqual(['### My Heading']);
-    });
-
-    it('rewrites H3 to H1, preserving content', () => {
-        expect(rewriteHeading(['### My Heading'], 0, 1)).toEqual(['# My Heading']);
-    });
-
-    it('rewrites H1 to H6, preserving content', () => {
-        expect(rewriteHeading(['# My Heading'], 0, 6)).toEqual(['###### My Heading']);
-    });
-
-    it('preserves surrounding lines unchanged', () => {
-        const lines = ['Intro', '## Heading', 'Body text'];
-        expect(rewriteHeading(lines, 1, 4)).toEqual(['Intro', '#### Heading', 'Body text']);
-    });
-
-    it('preserves multiple spaces after hashes', () => {
-        expect(rewriteHeading(['##  Spaced'], 0, 3)).toEqual(['###  Spaced']);
-    });
-
-    it('returns same array reference when level is unchanged', () => {
-        const lines = ['## Heading'];
-        expect(rewriteHeading(lines, 0, 2)).toBe(lines);
-    });
-
-    it('does not mutate the input array', () => {
-        const lines = ['# Heading'];
-        const original = [...lines];
-        rewriteHeading(lines, 0, 3);
-        expect(lines).toEqual(original);
+        expect(findHeadingAtLine(parser.parse(source), doc, 0)).toBeNull();
     });
 });
 
-describe('rewriteHeading – setext', () => {
-    it('rewrites setext H1 to H2, updating underline to dashes', () => {
-        const result = rewriteHeading(['My Heading', '========='], 0, 2);
-        expect(result[0]).toBe('My Heading');
-        expect(result[1]).toMatch(/^-+$/);
-        expect(result[1]).toHaveLength(9);
-        expect(result).toHaveLength(2);
+describe('buildHeadingChange – ATX', () => {
+    it('changes only the opening marker range', () => {
+        const source = 'Before\n## Heading\nAfter';
+        const { doc, heading } = headingAt(source, 2);
+        const change = buildHeadingChange(doc, heading, 4);
+
+        expect(change).toEqual([{ from: 7, to: 9, insert: '####' }]);
+        expect(applyChange(source, change!)).toBe('Before\n#### Heading\nAfter');
     });
 
-    it('rewrites setext H2 to H1, updating underline to equals', () => {
-        const result = rewriteHeading(['My Heading', '---------'], 0, 1);
-        expect(result[0]).toBe('My Heading');
-        expect(result[1]).toMatch(/^=+$/);
-        expect(result[1]).toHaveLength(9);
+    it('preserves indentation and separator spacing', () => {
+        expect(changeHeading('  ##  Heading', 5)).toBe('  #####  Heading');
     });
 
-    it('preserves minimum underline length of 3', () => {
-        const result = rewriteHeading(['Hi', '='], 0, 2);
-        expect(result[1]).toBe('---');
+    it('normalizes the closing sequence to the new level', () => {
+        expect(changeHeading('## Heading ##', 4)).toBe('#### Heading ####');
+        expect(changeHeading('## Heading #####', 3)).toBe('### Heading ###');
+        expect(changeHeading('  ##  Heading ##', 5)).toBe('  #####  Heading #####');
+        expect(changeHeading('> ## Quoted ##', 1)).toBe('> # Quoted #');
+        expect(changeHeading('## ##', 4)).toBe('#### ####');
     });
 
-    it('excludes trailing whitespace from the preserved underline length', () => {
-        const result = rewriteHeading(['My Heading', '=====  \t'], 0, 2);
-        expect(result[1]).toBe('-----');
+    it.each(['## Heading ##', '  ##  Heading ##', '> ## Quoted ##', '## ##', '## Heading #####'])(
+        're-parses at the requested level after a rewrite: %s',
+        (source) => {
+            for (const level of [1, 3, 6]) {
+                const rewritten = changeHeading(source, level);
+                expect(headingAt(rewritten).heading.level).toBe(level);
+            }
+        }
+    );
+
+    it('changes an empty heading', () => {
+        expect(changeHeading('##', 6)).toBe('######');
     });
 
-    it('converts setext H1 to ATX H3, removing underline line', () => {
-        const result = rewriteHeading(['My Heading', '=========', 'Some text'], 0, 3);
-        expect(result).toEqual(['### My Heading', 'Some text']);
+    it('removes the marker and exactly one separator character', () => {
+        expect(changeHeading('###  Heading', null)).toBe(' Heading');
+        expect(changeHeading('  ### Heading', null)).toBe('  Heading');
+        expect(changeHeading('###', null)).toBe('');
     });
 
-    it('converts setext H2 to ATX H6, removing underline line', () => {
-        const result = rewriteHeading(['My Heading', '---------'], 0, 6);
-        expect(result).toEqual(['###### My Heading']);
+    it('removes the closing sequence and all of its leading whitespace', () => {
+        expect(changeHeading('### Heading ###', null)).toBe('Heading');
+        expect(changeHeading('### Heading   ###', null)).toBe('Heading');
+        expect(changeHeading('### Heading ###   ', null)).toBe('Heading   ');
+        expect(changeHeading('> ## Quoted ##', null)).toBe('> Quoted');
     });
 
-    it('trims text content when converting setext to ATX', () => {
-        const result = rewriteHeading(['  My Heading  ', '============='], 0, 4);
-        expect(result[0]).toBe('#### My Heading');
+    it('removes overlapping opening and closing sequences of an empty heading', () => {
+        expect(changeHeading('## ##', null)).toBe('');
+        expect(changeHeading('###  ###', null)).toBe('');
     });
 
-    it('returns same array reference when level is unchanged', () => {
-        const lines = ['My Heading', '========='];
-        expect(rewriteHeading(lines, 0, 1)).toBe(lines);
-    });
-
-    it('does not mutate the input array', () => {
-        const lines = ['My Heading', '=========', 'Next line'];
-        const original = [...lines];
-        rewriteHeading(lines, 0, 3);
-        expect(lines).toEqual(original);
-    });
-});
-
-describe('rewriteHeading – non-heading lines', () => {
-    it('returns same array reference for non-heading line', () => {
-        const lines = ['Just some text'];
-        expect(rewriteHeading(lines, 0, 2)).toBe(lines);
-    });
-
-    it('returns same array reference for out-of-bounds index', () => {
-        const lines = ['text'];
-        expect(rewriteHeading(lines, 5, 2)).toBe(lines);
+    it('edits nested headings without removing their container markers', () => {
+        expect(changeHeading('> ## Quoted', 4)).toBe('> #### Quoted');
+        expect(changeHeading('- ## Listed', null)).toBe('- Listed');
     });
 });
 
-describe('removeHeading', () => {
-    it('removes ATX heading markers and the required separator', () => {
-        expect(removeHeading(['### Heading'], 0)).toEqual(['Heading']);
-        expect(removeHeading(['##  Spaced'], 0)).toEqual([' Spaced']);
+describe('buildHeadingChange – setext', () => {
+    it('changes only the underline marker and preserves surrounding whitespace', () => {
+        const source = 'Title\n  ===  \t';
+        const { doc, heading } = headingAt(source);
+        const change = buildHeadingChange(doc, heading, 2);
+
+        expect(change).toEqual({ from: 8, to: 11, insert: '---' });
+        expect(applyChange(source, change!)).toBe('Title\n  ---  \t');
+        expect(changeHeading('Title\n---', 1)).toBe('Title\n===');
     });
 
-    it('removes setext underline line and preserves heading text', () => {
-        expect(removeHeading(['My Heading', '---------', 'Next line'], 0)).toEqual(['My Heading', 'Next line']);
+    it('converts a single-line setext heading to ATX', () => {
+        expect(changeHeading('Title\n=====', 3)).toBe('### Title');
     });
 
-    it('returns same array reference for non-heading line', () => {
-        const lines = ['Just some text'];
-        expect(removeHeading(lines, 0)).toBe(lines);
+    it('collapses multiline setext content with single spaces', () => {
+        const source = 'Before\n\nFirst line\n  second line  \n---\nAfter';
+        expect(changeHeading(source, 4, 3)).toBe('Before\n\n#### First line second line\nAfter');
     });
 
-    it('does not mutate the input array', () => {
-        const lines = ['# Heading', 'Next line'];
-        const original = [...lines];
-        removeHeading(lines, 0);
-        expect(lines).toEqual(original);
+    it('preserves the first-line indentation when collapsing an indented heading', () => {
+        expect(changeHeading('  First\n  second\n  ---', 3)).toBe('  ### First second');
+    });
+
+    it('collapses multiline block-quoted setext content without retaining continuation quote markers', () => {
+        expect(changeHeading('> First\n> second\n> ---', 3)).toBe('> ### First second');
+    });
+
+    it('removes only the underline from a single-line setext heading', () => {
+        expect(changeHeading('Before\n\nTitle\n---\nAfter', null, 3)).toBe('Before\n\nTitle\nAfter');
+    });
+
+    it('preserves every content line when converting a multiline setext heading to a paragraph', () => {
+        expect(changeHeading('First\nsecond\n---\nAfter', null)).toBe('First\nsecond\nAfter');
+    });
+});
+
+describe('heading change validation', () => {
+    it('returns null when the requested level is unchanged or invalid', () => {
+        const { doc, heading } = headingAt('## Heading');
+
+        expect(buildHeadingChange(doc, heading, 2)).toBeNull();
+        expect(buildHeadingChange(doc, heading, 0)).toBeNull();
+        expect(buildHeadingChange(doc, heading, 7)).toBeNull();
+        expect(buildHeadingChange(doc, heading, 2.5)).toBeNull();
+    });
+
+    it('returns null for stale or inconsistent marker ranges', () => {
+        const { doc, heading } = headingAt('## Heading');
+
+        expect(buildHeadingChange(doc, { ...heading, markerTo: heading.markerTo + 1 }, 3)).toBeNull();
+        expect(buildHeadingChange(doc, { ...heading, to: doc.length + 1 }, 3)).toBeNull();
+        expect(buildHeadingChange(doc, { ...heading, closingFrom: 4 }, 3)).toBeNull();
+        expect(buildHeadingChange(doc, { ...heading, closingFrom: 8, closingTo: 4 }, 3)).toBeNull();
+    });
+
+    it('compares every syntax-backed heading property', () => {
+        const { heading } = headingAt('## Heading');
+
+        expect(headingsEqual(heading, { ...heading })).toBe(true);
+        expect(headingsEqual(heading, { ...heading, markerFrom: heading.markerFrom + 1 })).toBe(false);
+        expect(headingsEqual(heading, { ...heading, level: 3 })).toBe(false);
+        expect(headingsEqual(heading, { ...heading, closingFrom: 8, closingTo: 10 })).toBe(false);
     });
 });
