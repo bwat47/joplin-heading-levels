@@ -12,7 +12,13 @@ import {
 import { syntaxTree } from '@codemirror/language';
 import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
-import { detectHeadingAtLine, removeHeading, rewriteHeading } from './headingHelpers';
+import {
+    buildHeadingChange,
+    findHeadingAtLine,
+    headingInfoFromNode,
+    headingsEqual,
+    type HeadingInfo,
+} from './headingHelpers';
 import { calculateGutterOffset, hasRoomForOverlaidGutter, type GutterOffsetInput } from './layoutHelpers';
 import {
     cancelViewAnimationFrame,
@@ -344,11 +350,12 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
         from,
         to,
         enter(node) {
-            const match = /^(?:ATX|Setext)Heading(\d)$/.exec(node.name);
-            if (match) {
-                const level = parseInt(match[1]);
-                builder.add(node.from, node.from, LEVEL_MARKERS[level - 1]);
-            }
+            const heading = headingInfoFromNode(node);
+            if (!heading) return;
+
+            const lineFrom = view.state.doc.lineAt(heading.from).from;
+            builder.add(lineFrom, lineFrom, LEVEL_MARKERS[heading.level - 1]);
+            return false;
         },
     });
 
@@ -458,8 +465,7 @@ const gutterMeasureExtension = ViewPlugin.fromClass(GutterMeasurePlugin);
 
 interface HeadingMenuState {
     pos: number;
-    headingLineNumber: number;
-    currentLevel: number;
+    heading: HeadingInfo;
 }
 
 const openHeadingMenuEffect = StateEffect.define<HeadingMenuState>();
@@ -483,14 +489,14 @@ function createHeadingMenuTooltip(menuState: HeadingMenuState): Tooltip {
             for (let l = 1; l <= 6; l++) {
                 const item = doc.createElement('div');
                 item.className = 'hl-heading-menu-item';
-                if (l === menuState.currentLevel) item.classList.add('hl-heading-menu-item-current');
+                if (l === menuState.heading.level) item.classList.add('hl-heading-menu-item-current');
                 item.textContent = `Heading ${l}`;
                 item.setAttribute('role', 'menuitem');
                 const targetLevel = l;
                 item.addEventListener('pointerdown', (event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    applyHeadingChange(view, menuState.headingLineNumber, targetLevel);
+                    applyHeadingChange(view, menuState.heading, targetLevel);
                 });
                 menu.appendChild(item);
             }
@@ -502,7 +508,7 @@ function createHeadingMenuTooltip(menuState: HeadingMenuState): Tooltip {
             paragraphItem.addEventListener('pointerdown', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                applyHeadingChange(view, menuState.headingLineNumber, null);
+                applyHeadingChange(view, menuState.heading, null);
             });
             menu.appendChild(paragraphItem);
 
@@ -570,73 +576,33 @@ const headingMenuStateField = StateField.define<HeadingMenuState | null>({
 // Heading change application
 // ---------------------------------------------------------------------------
 
-function applyHeadingChange(view: EditorView, headingLineNumber: number, newLevel: number | null): void {
+function applyHeadingChange(view: EditorView, heading: HeadingInfo, newLevel: number | null): void {
     const doc = view.state.doc;
 
-    const lines: string[] = [];
-    for (let i = 1; i <= doc.lines; i++) {
-        lines.push(doc.line(i).text);
-    }
+    const headingLine = doc.lineAt(heading.from);
+    const currentHeading = findHeadingAtLine(syntaxTree(view.state), doc, headingLine.from);
+    const change =
+        currentHeading && headingsEqual(currentHeading, heading)
+            ? buildHeadingChange(doc, currentHeading, newLevel)
+            : null;
 
-    const lineIndex = headingLineNumber - 1;
-    const heading = detectHeadingAtLine(lines, lineIndex);
-    if (!heading || (newLevel !== null && heading.level === newLevel)) {
+    if (!change) {
         closeHeadingMenu(view);
         return;
     }
 
-    const newLines = newLevel === null ? removeHeading(lines, lineIndex) : rewriteHeading(lines, lineIndex, newLevel);
-
-    let from: number;
-    let to: number;
-    let insert: string;
-
-    if (newLevel === null) {
-        const textDocLine = doc.line(headingLineNumber);
-        if (heading.type === 'atx') {
-            from = textDocLine.from;
-            to = textDocLine.to;
-            insert = newLines[lineIndex];
-        } else {
-            const underlineDocLine = doc.line(headingLineNumber + 1);
-            from = textDocLine.from;
-            to = underlineDocLine.to;
-            insert = newLines[lineIndex];
-        }
-    } else if (heading.type === 'atx') {
-        const docLine = doc.line(headingLineNumber);
-        from = docLine.from;
-        to = docLine.to;
-        insert = newLines[lineIndex];
-    } else {
-        const textDocLine = doc.line(headingLineNumber);
-        const underlineDocLine = doc.line(headingLineNumber + 1);
-        if (newLevel <= 2) {
-            // Only the underline line changes
-            from = underlineDocLine.from;
-            to = underlineDocLine.to;
-            insert = newLines[lineIndex + 1];
-        } else {
-            // Text line + underline line replaced by single ATX line
-            from = textDocLine.from;
-            to = underlineDocLine.to;
-            insert = newLines[lineIndex];
-        }
-    }
-
     view.dispatch({
-        changes: { from, to, insert },
+        changes: change,
         effects: closeHeadingMenuEffect.of(null),
     });
 }
 
-function openHeadingMenu(view: EditorView, lineFrom: number, headingLineNumber: number, currentLevel: number): void {
+function openHeadingMenu(view: EditorView, lineFrom: number, heading: HeadingInfo): void {
     view.dispatch({
         selection: { anchor: lineFrom },
         effects: openHeadingMenuEffect.of({
             pos: lineFrom,
-            headingLineNumber,
-            currentLevel,
+            heading,
         }),
     });
 }
@@ -663,9 +629,10 @@ function createGutterExtension() {
                 const target = event.target as HTMLElement;
                 if (!target.classList.contains('hl-gutter-marker')) return false;
 
-                const level = parseInt(target.getAttribute('data-level') ?? '1');
-                const lineNumber = view.state.doc.lineAt(line.from).number;
-                openHeadingMenu(view, line.from, lineNumber, level);
+                const heading = findHeadingAtLine(syntaxTree(view.state), view.state.doc, line.from);
+                if (!heading) return false;
+
+                openHeadingMenu(view, line.from, heading);
                 return true;
             },
         },

@@ -25,6 +25,8 @@
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.41.0",
         "@eslint/js": "^10.0.1",
+        "@lezer/common": "^1.5.2",
+        "@lezer/markdown": "^1.7.2",
         "@types/node": "^25.9.4",
         "@typescript-eslint/eslint-plugin": "^8.66.0",
         "@typescript-eslint/parser": "^8.66.0",
@@ -42,8 +44,8 @@
         "tar": "^7.5.13",
         "ts-loader": "^9.5.7",
         "typescript": "^6.0.3",
-        "webpack": "^5.106.1",
         "vitest": "^4.0.0",
+        "webpack": "^5.106.1",
         "webpack-cli": "^7.0.2"
     }
 }

@@ -1,138 +1,165 @@
-/**
- * Pure functions for detecting and rewriting Markdown headings.
- *
- * Supports ATX headings (`# H1` through `###### H6`) and setext headings
- * (`===` for H1, `---` for H2).  All functions are side-effect free so they
- * can be unit-tested without a CM6 editor context.
- */
+import type { ChangeSpec, Text } from '@codemirror/state';
+import type { SyntaxNodeRef, Tree } from '@lezer/common';
 
 type HeadingType = 'atx' | 'setext';
 
+/** The syntax-tree range and opening/underline marker for a Markdown heading. */
 export interface HeadingInfo {
+    from: number;
+    to: number;
+    markerFrom: number;
+    markerTo: number;
     level: number;
     type: HeadingType;
 }
 
-/**
- * Parse a single line as an ATX heading.
- *
- * @example `parseAtxHeading('# Hello')` → `{ level: 1, type: 'atx' }`
- * @example `parseAtxHeading('## World')` → `{ level: 2, type: 'atx' }`
- * @example `parseAtxHeading('plain text')` → `null`
- * @example `parseAtxHeading('####### seven')` → `null` (7 hashes not valid)
- */
-export function parseAtxHeading(line: string): HeadingInfo | null {
-    // 1-6 # characters followed by a space/tab or end-of-line
-    const match = /^(#{1,6})([ \t]|$)/.exec(line);
+const HEADING_NODE_PATTERN = /^(ATX|Setext)Heading([1-6])$/;
+
+/** Convert a Lezer Markdown heading node into the data needed to edit it. */
+export function headingInfoFromNode(node: SyntaxNodeRef): HeadingInfo | null {
+    const match = HEADING_NODE_PATTERN.exec(node.name);
     if (!match) return null;
-    return { level: match[1].length, type: 'atx' };
+
+    const marker = node.node.getChild('HeaderMark');
+    if (!marker) return null;
+
+    return {
+        from: node.from,
+        to: node.to,
+        markerFrom: marker.from,
+        markerTo: marker.to,
+        level: Number(match[2]),
+        type: match[1] === 'ATX' ? 'atx' : 'setext',
+    };
 }
 
-/**
- * Parse a setext heading given the text line and its following underline line.
- *
- * A setext underline is a line of only `=` characters (H1) or `-` characters (H2),
- * optionally followed by trailing spaces.
- *
- * @example `parseSetextHeading('Hello', '=====')` → `{ level: 1, type: 'setext' }`
- * @example `parseSetextHeading('Hello', '-----')` → `{ level: 2, type: 'setext' }`
- * @example `parseSetextHeading('', '=====')` → `null` (blank text line)
- */
-export function parseSetextHeading(line: string, underlineLine: string | undefined): HeadingInfo | null {
-    if (underlineLine === undefined) return null;
-    // Blank text lines cannot form setext headings
-    if (!line.trim()) return null;
-    // Lines that are themselves ATX headings take precedence
-    if (/^#{1,6}([ \t]|$)/.test(line)) return null;
+/** Find the heading whose first document line matches the given line. */
+export function findHeadingAtLine(tree: Tree, doc: Text, lineFrom: number): HeadingInfo | null {
+    if (lineFrom < 0 || lineFrom > doc.length) return null;
 
-    if (/^=+\s*$/.test(underlineLine)) return { level: 1, type: 'setext' };
-    if (/^-+\s*$/.test(underlineLine)) return { level: 2, type: 'setext' };
-    return null;
+    const line = doc.lineAt(lineFrom);
+    let heading: HeadingInfo | null = null;
+
+    tree.iterate({
+        from: line.from,
+        to: line.to,
+        enter(node) {
+            if (heading) return false;
+
+            const candidate = headingInfoFromNode(node);
+            if (candidate && doc.lineAt(candidate.from).from === line.from) {
+                heading = candidate;
+                return false;
+            }
+        },
+    });
+
+    return heading;
 }
 
-/**
- * Detect the heading type and level at a given (0-based) line index.
- *
- * ATX headings are detected on `lines[lineIndex]` alone.
- * Setext headings require `lines[lineIndex + 1]` to be a valid underline.
- *
- * Returns `null` when `lineIndex` does not start a heading.
- */
-export function detectHeadingAtLine(lines: string[], lineIndex: number): HeadingInfo | null {
-    const line = lines[lineIndex];
-    if (line === undefined) return null;
-
-    const atx = parseAtxHeading(line);
-    if (atx) return atx;
-
-    return parseSetextHeading(line, lines[lineIndex + 1]);
+export function headingsEqual(left: HeadingInfo, right: HeadingInfo): boolean {
+    return (
+        left.from === right.from &&
+        left.to === right.to &&
+        left.markerFrom === right.markerFrom &&
+        left.markerTo === right.markerTo &&
+        left.level === right.level &&
+        left.type === right.type
+    );
 }
 
-/**
- * Rewrite the heading at `lineIndex` to `newLevel`, returning a new lines array.
- *
- * Rules:
- * - ATX headings keep ATX syntax; only the `#` prefix is updated.
- * - Setext H1 ↔ H2 stays setext; the underline character is updated to match.
- * - Setext heading changed to H3–H6 is rewritten as ATX; the underline line is removed.
- *
- * The input `lines` array is never mutated.  When `lineIndex` is not a heading or
- * `newLevel` equals the current level the original array reference is returned unchanged.
- */
-export function rewriteHeading(lines: string[], lineIndex: number, newLevel: number): string[] {
-    const heading = detectHeadingAtLine(lines, lineIndex);
-    if (!heading) return lines;
-    if (heading.level === newLevel) return lines;
+function hasValidRanges(doc: Text, heading: HeadingInfo): boolean {
+    return (
+        heading.from >= 0 &&
+        heading.from <= heading.markerFrom &&
+        heading.markerFrom < heading.markerTo &&
+        heading.markerTo <= heading.to &&
+        heading.to <= doc.length
+    );
+}
 
-    const result = lines.slice();
-    const line = lines[lineIndex];
+function buildAtxChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+    const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
+    if (marker !== '#'.repeat(heading.level)) return null;
 
-    if (heading.type === 'atx') {
-        // Preserve everything after the leading # characters (including any space)
-        const match = /^(#{1,6})/.exec(line)!;
-        result[lineIndex] = '#'.repeat(newLevel) + line.slice(match[1].length);
-    } else {
-        // setext heading — underline is always on the next line
-        const underlineIndex = lineIndex + 1;
-        const underline = lines[underlineIndex];
-
-        if (newLevel <= 2) {
-            // Keep setext; swap underline character while preserving its length
-            const underlineChar = newLevel === 1 ? '=' : '-';
-            const underlineLen = Math.max(underline.trimEnd().length, 3);
-            result[underlineIndex] = underlineChar.repeat(underlineLen);
-        } else {
-            // Convert to ATX; remove the underline line
-            result[lineIndex] = '#'.repeat(newLevel) + ' ' + line.trim();
-            result.splice(underlineIndex, 1);
-        }
+    if (newLevel !== null) {
+        return {
+            from: heading.markerFrom,
+            to: heading.markerTo,
+            insert: '#'.repeat(newLevel),
+        };
     }
 
-    return result;
+    const markerLine = doc.lineAt(heading.markerFrom);
+    const separator = doc.sliceString(heading.markerTo, Math.min(heading.markerTo + 1, markerLine.to));
+
+    return {
+        from: heading.markerFrom,
+        to: heading.markerTo + (/^[ \t]$/.test(separator) ? 1 : 0),
+        insert: '',
+    };
 }
 
-/**
- * Remove heading formatting at `lineIndex`, returning a new lines array.
- *
- * Rules:
- * - ATX headings drop the leading `#` markers and their required separator.
- * - Setext headings keep the text line and remove the underline line.
- *
- * The input `lines` array is never mutated. When `lineIndex` is not a heading
- * the original array reference is returned unchanged.
- */
-export function removeHeading(lines: string[], lineIndex: number): string[] {
-    const heading = detectHeadingAtLine(lines, lineIndex);
-    if (!heading) return lines;
+function setextContent(doc: Text, heading: HeadingInfo): string | null {
+    const firstLine = doc.lineAt(heading.from);
+    const underlineLine = doc.lineAt(heading.markerFrom);
+    const content: string[] = [];
 
-    const result = lines.slice();
-    const line = lines[lineIndex];
-
-    if (heading.type === 'atx') {
-        result[lineIndex] = line.replace(/^#{1,6}(?:[ \t]|$)/, '');
-    } else {
-        result.splice(lineIndex + 1, 1);
+    for (let lineNumber = firstLine.number; lineNumber < underlineLine.number; lineNumber++) {
+        const line = doc.line(lineNumber);
+        const from = lineNumber === firstLine.number ? heading.from - line.from : 0;
+        // Continuation lines inside block quotes include their quote marker in
+        // the heading node. Strip that container prefix before collapsing.
+        const text = line.text
+            .slice(from)
+            .trim()
+            .replace(/^(?:>[ \t]?)+/, '')
+            .trim();
+        if (text) content.push(text);
     }
 
-    return result;
+    return content.length > 0 ? content.join(' ') : null;
+}
+
+function buildSetextChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+    const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
+    const expectedMarker = heading.level === 1 ? '=' : '-';
+    if (!marker || [...marker].some((character) => character !== expectedMarker)) return null;
+
+    const underlineLine = doc.lineAt(heading.markerFrom);
+
+    if (newLevel === null) {
+        if (underlineLine.number <= 1) return null;
+        return {
+            from: doc.line(underlineLine.number - 1).to,
+            to: heading.to,
+            insert: '',
+        };
+    }
+
+    if (newLevel <= 2) {
+        return {
+            from: heading.markerFrom,
+            to: heading.markerTo,
+            insert: (newLevel === 1 ? '=' : '-').repeat(marker.length),
+        };
+    }
+
+    const content = setextContent(doc, heading);
+    if (!content) return null;
+
+    return {
+        from: heading.from,
+        to: heading.to,
+        insert: `${'#'.repeat(newLevel)} ${content}`,
+    };
+}
+
+/** Build one localized edit for changing or removing a syntax-tree heading. */
+export function buildHeadingChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+    if (!hasValidRanges(doc, heading)) return null;
+    if (newLevel !== null && (!Number.isInteger(newLevel) || newLevel < 1 || newLevel > 6)) return null;
+    if (newLevel === heading.level) return null;
+
+    return heading.type === 'atx' ? buildAtxChange(doc, heading, newLevel) : buildSetextChange(doc, heading, newLevel);
 }
