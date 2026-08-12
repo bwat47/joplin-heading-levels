@@ -95,7 +95,9 @@ function hasValidRanges(doc: Text, heading: HeadingInfo): boolean {
         if (
             heading.closingFrom === null ||
             heading.closingTo === null ||
-            heading.closingFrom < heading.markerTo ||
+            // A closing run is always separated from the opening one, so the two
+            // rewrite ranges can never touch.
+            heading.closingFrom <= heading.markerTo ||
             heading.closingFrom >= heading.closingTo ||
             heading.closingTo > heading.to
         ) {
@@ -109,42 +111,44 @@ function hasValidRanges(doc: Text, heading: HeadingInfo): boolean {
 }
 
 /**
- * Range covering an ATX closing sequence (`## Heading ##`) plus the whitespace
- * separating it from the content, or `null` when there is nothing to remove.
- *
- * Unlike the opening separator, every space is taken: leaving two behind would
- * turn the removed closing sequence into a trailing hard line break.
+ * Range of an ATX closing sequence (`## Heading ##`), or `null` when the heading
+ * has none or the recorded range no longer holds only `#` characters.
  */
-function atxClosingRange(doc: Text, heading: HeadingInfo, openingTo: number): ChangeSpec | null {
+function atxClosingRange(doc: Text, heading: HeadingInfo): { from: number; to: number } | null {
     if (heading.closingFrom === null || heading.closingTo === null) return null;
-    if (heading.closingTo <= openingTo) return null;
     if (!/^#+$/.test(doc.sliceString(heading.closingFrom, heading.closingTo))) return null;
 
-    let from = Math.max(heading.closingFrom, openingTo);
-    while (from > openingTo && /^[ \t]$/.test(doc.sliceString(from - 1, from))) from--;
-
-    return { from, to: heading.closingTo, insert: '' };
+    return { from: heading.closingFrom, to: heading.closingTo };
 }
 
 function buildAtxChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
     const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
     if (marker !== '#'.repeat(heading.level)) return null;
 
+    const closing = atxClosingRange(doc, heading);
+
     if (newLevel !== null) {
-        return {
-            from: heading.markerFrom,
-            to: heading.markerTo,
-            insert: '#'.repeat(newLevel),
-        };
+        const hashes = '#'.repeat(newLevel);
+        const changes: ChangeSpec[] = [{ from: heading.markerFrom, to: heading.markerTo, insert: hashes }];
+        // CommonMark lets the two runs differ in length, but a heading that
+        // reads `#### Heading ##` is just untidy: normalise it to the new level.
+        if (closing) changes.push({ ...closing, insert: hashes });
+        return changes;
     }
 
+    // Drop the opening run plus its single required separator character.
     const markerLine = doc.lineAt(heading.markerFrom);
     const separator = doc.sliceString(heading.markerTo, Math.min(heading.markerTo + 1, markerLine.to));
     const openingTo = heading.markerTo + (/^[ \t]$/.test(separator) ? 1 : 0);
-
     const changes: ChangeSpec[] = [{ from: heading.markerFrom, to: openingTo, insert: '' }];
-    const closing = atxClosingRange(doc, heading, openingTo);
-    if (closing) changes.push(closing);
+
+    if (closing && closing.to > openingTo) {
+        // Unlike the opening separator, every space before the closing run is
+        // taken: leaving two behind would become a trailing hard line break.
+        let from = Math.max(closing.from, openingTo);
+        while (from > openingTo && /^[ \t]$/.test(doc.sliceString(from - 1, from))) from--;
+        changes.push({ from, to: closing.to, insert: '' });
+    }
 
     return changes;
 }

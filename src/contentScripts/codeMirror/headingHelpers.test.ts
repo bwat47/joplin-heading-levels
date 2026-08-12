@@ -89,13 +89,31 @@ describe('buildHeadingChange – ATX', () => {
         const { doc, heading } = headingAt(source, 2);
         const change = buildHeadingChange(doc, heading, 4);
 
-        expect(change).toEqual({ from: 7, to: 9, insert: '####' });
+        expect(change).toEqual([{ from: 7, to: 9, insert: '####' }]);
         expect(applyChange(source, change!)).toBe('Before\n#### Heading\nAfter');
     });
 
-    it('preserves indentation, separator spacing, and closing hashes', () => {
-        expect(changeHeading('  ##  Heading ##', 5)).toBe('  #####  Heading ##');
+    it('preserves indentation and separator spacing', () => {
+        expect(changeHeading('  ##  Heading', 5)).toBe('  #####  Heading');
     });
+
+    it('normalizes the closing sequence to the new level', () => {
+        expect(changeHeading('## Heading ##', 4)).toBe('#### Heading ####');
+        expect(changeHeading('## Heading #####', 3)).toBe('### Heading ###');
+        expect(changeHeading('  ##  Heading ##', 5)).toBe('  #####  Heading #####');
+        expect(changeHeading('> ## Quoted ##', 1)).toBe('> # Quoted #');
+        expect(changeHeading('## ##', 4)).toBe('#### ####');
+    });
+
+    it.each(['## Heading ##', '  ##  Heading ##', '> ## Quoted ##', '## ##', '## Heading #####'])(
+        're-parses at the requested level after a rewrite: %s',
+        (source) => {
+            for (const level of [1, 3, 6]) {
+                const rewritten = changeHeading(source, level);
+                expect(headingAt(rewritten).heading.level).toBe(level);
+            }
+        }
+    );
 
     it('changes an empty heading', () => {
         expect(changeHeading('##', 6)).toBe('######');
