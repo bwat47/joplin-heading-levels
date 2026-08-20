@@ -11,7 +11,7 @@ import {
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
-import type { CodeMirrorControl, ContentScriptContext } from 'api/types';
+import type { CodeMirrorControl, ContentScriptContext, MarkdownEditorContentScriptModule } from 'api/types';
 import {
     buildHeadingChange,
     findHeadingAtLine,
@@ -639,9 +639,9 @@ function createGutterExtension() {
 // Content script entry point
 // ---------------------------------------------------------------------------
 
-export default function (context: ContentScriptContext) {
+export default function (context: ContentScriptContext): MarkdownEditorContentScriptModule {
     return {
-        plugin: async function (editorControl: CodeMirrorControl) {
+        plugin: async function (editorControl: CodeMirrorControl): Promise<void> {
             if (!editorControl?.cm6) {
                 logger.warn('CodeMirror 6 not available; skipping heading level gutter.');
                 return;
