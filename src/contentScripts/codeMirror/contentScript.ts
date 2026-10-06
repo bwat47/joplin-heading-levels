@@ -635,50 +635,54 @@ function createGutterExtension() {
     });
 }
 
+async function setupEditor(context: ContentScriptContext, editorControl: CodeMirrorControl): Promise<void> {
+    if (!editorControl?.cm6) {
+        logger.warn('CodeMirror 6 not available; skipping heading level gutter.');
+        return;
+    }
+
+    const editor = editorControl.editor as EditorView;
+
+    // Fetch initial config from the main plugin
+    let config: Config = DEFAULT_CONFIG;
+    try {
+        const response: unknown = await context.postMessage({ type: 'getSettings' });
+        if (response && typeof response === 'object') {
+            config = response as Config;
+        }
+    } catch (e) {
+        logger.warn('Could not fetch settings; using defaults.', e);
+    }
+
+    const configCompartment = new Compartment();
+
+    editorControl.addExtension([
+        configCompartment.of(configFacet.of(config)),
+        headingLevelsTheme,
+        createGutterExtension(),
+        gutterAlignmentExtension,
+        gutterPlacementExtension,
+        gutterMeasureExtension,
+        headingMenuStateField,
+        tooltips(),
+    ]);
+
+    // Command for live config updates pushed from the main plugin
+    editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
+        editor.dispatch({
+            effects: configCompartment.reconfigure(configFacet.of(newConfig)),
+        });
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Content script entry point
 // ---------------------------------------------------------------------------
 
 export default function (context: ContentScriptContext): MarkdownEditorContentScriptModule {
     return {
-        plugin: async function (editorControl: CodeMirrorControl): Promise<void> {
-            if (!editorControl?.cm6) {
-                logger.warn('CodeMirror 6 not available; skipping heading level gutter.');
-                return;
-            }
-
-            const editor = editorControl.editor as EditorView;
-
-            // Fetch initial config from the main plugin
-            let config: Config = DEFAULT_CONFIG;
-            try {
-                const response = await context.postMessage({ type: 'getSettings' });
-                if (response && typeof response === 'object') {
-                    config = response as Config;
-                }
-            } catch (e) {
-                logger.warn('Could not fetch settings; using defaults.', e);
-            }
-
-            const configCompartment = new Compartment();
-
-            editorControl.addExtension([
-                configCompartment.of(configFacet.of(config)),
-                headingLevelsTheme,
-                createGutterExtension(),
-                gutterAlignmentExtension,
-                gutterPlacementExtension,
-                gutterMeasureExtension,
-                headingMenuStateField,
-                tooltips(),
-            ]);
-
-            // Command for live config updates pushed from the main plugin
-            editorControl.registerCommand(COMMAND_SET_CONFIG, (newConfig: Config) => {
-                editor.dispatch({
-                    effects: configCompartment.reconfigure(configFacet.of(newConfig)),
-                });
-            });
+        plugin: function (editorControl: CodeMirrorControl): void {
+            void setupEditor(context, editorControl);
         },
     };
 }
