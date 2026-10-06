@@ -66,8 +66,14 @@ const headingLevelsTheme = EditorView.theme({
         minWidth: '2em',
         padding: '0 2px 0 4px',
     },
-    '.hl-gutter-before': {
+    // Placement is set with flex order rather than DOM order: CodeMirror
+    // orders gutters by extension registration, which depends on which plugin
+    // (e.g. one adding line numbers) happened to load first.
+    '&.hl-gutter-placement-before .hl-gutter': {
         order: -1,
+    },
+    '&.hl-gutter-placement-after .hl-gutter': {
+        order: 1,
     },
     '.hl-gutter-marker': {
         display: 'flex',
@@ -184,6 +190,9 @@ class GutterAlignmentPlugin {
 
     private readonly resizeObserver: ResizeObserver | null;
 
+    /** Gutter wrapper being watched, so width changes from other gutters trigger a sync. */
+    private observedGutterWrapper: HTMLElement | null = null;
+
     private readonly viewWindow: Window;
 
     private readonly handleWindowResize = () => {
@@ -244,6 +253,8 @@ class GutterAlignmentPlugin {
         const gutterWrapper = this.view.scrollDOM.querySelector<HTMLElement>('.cm-gutters');
         if (!gutterWrapper) return;
 
+        this.observeGutterWrapper(gutterWrapper);
+
         let metrics = measureGutterMetrics(this.view, gutterWrapper);
 
         if (layoutKey(metrics, this.overlaid) !== this.appliedLayoutKey) {
@@ -255,6 +266,21 @@ class GutterAlignmentPlugin {
         if (gutterWrapper.style.left !== nextLeft) {
             gutterWrapper.style.left = nextLeft;
         }
+    }
+
+    /**
+     * Another plugin can add a gutter (such as line numbers) after this one is
+     * set up, widening the wrapper without resizing the editor or content, so
+     * the wrapper itself has to be watched.
+     */
+    private observeGutterWrapper(gutterWrapper: HTMLElement): void {
+        if (!this.resizeObserver || this.observedGutterWrapper === gutterWrapper) return;
+
+        if (this.observedGutterWrapper) {
+            this.resizeObserver.unobserve(this.observedGutterWrapper);
+        }
+        this.resizeObserver.observe(gutterWrapper);
+        this.observedGutterWrapper = gutterWrapper;
     }
 
     /**
@@ -285,33 +311,9 @@ class GutterAlignmentPlugin {
 
 const gutterAlignmentExtension = ViewPlugin.fromClass(GutterAlignmentPlugin);
 
-class GutterPlacementPlugin {
-    constructor(private readonly view: EditorView) {
-        this.syncPlacementClass(this.view.state.facet(configFacet));
-    }
-
-    update(update: ViewUpdate): void {
-        const previousConfig = update.startState.facet(configFacet);
-        const nextConfig = update.state.facet(configFacet);
-
-        if (
-            previousConfig.gutterPlacement !== nextConfig.gutterPlacement ||
-            update.geometryChanged ||
-            update.viewportChanged
-        ) {
-            this.syncPlacementClass(nextConfig);
-        }
-    }
-
-    private syncPlacementClass(config: Config): void {
-        const gutterElement = this.view.scrollDOM.querySelector<HTMLElement>('.hl-gutter');
-        if (!gutterElement) return;
-
-        gutterElement.classList.toggle('hl-gutter-before', config.gutterPlacement === 'before');
-    }
-}
-
-const gutterPlacementExtension = ViewPlugin.fromClass(GutterPlacementPlugin);
+const gutterPlacementExtension = EditorView.editorAttributes.compute([configFacet], (state) => ({
+    class: `hl-gutter-placement-${state.facet(configFacet).gutterPlacement}`,
+}));
 
 // ---------------------------------------------------------------------------
 // Gutter marker
