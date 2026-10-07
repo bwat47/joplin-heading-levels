@@ -31,8 +31,6 @@ export default defineConfig(
         },
         rules: {
             // Turn off rules TypeScript handles (prevents NodeJS / type-only false positives)
-            'no-undef': 'off',
-            'no-useless-escape': 'off',
             '@typescript-eslint/no-inferrable-types': 'error',
             '@typescript-eslint/explicit-module-boundary-types': 'error',
         },
