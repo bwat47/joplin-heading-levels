@@ -66,9 +66,10 @@ const headingLevelsTheme = EditorView.theme({
         minWidth: '2em',
         padding: '0 2px 0 4px',
     },
-    // Placement is set with flex order rather than DOM order: CodeMirror
-    // orders gutters by extension registration, which depends on which plugin
-    // (e.g. one adding line numbers) happened to load first.
+    // Placement is set with flex order rather than DOM order. CodeMirror
+    // orders gutters by extension precedence, and only among gutters on the
+    // same side, so a plugin that adds line numbers can land on either side
+    // of this one depending on which extension wins.
     '&.hl-gutter-placement-before .hl-gutter': {
         order: -1,
     },
