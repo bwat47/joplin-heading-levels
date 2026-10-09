@@ -10,7 +10,7 @@ import {
     type ViewUpdate,
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Compartment, Facet, RangeSetBuilder, RangeSet, StateEffect, StateField } from '@codemirror/state';
+import { Compartment, Facet, RangeSetBuilder, type RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { CodeMirrorControl, ContentScriptContext, MarkdownEditorContentScriptModule } from 'api/types';
 import {
     buildHeadingChange,
