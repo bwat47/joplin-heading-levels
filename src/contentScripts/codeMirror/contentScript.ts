@@ -325,7 +325,7 @@ class HeadingMarker extends GutterMarker {
         super();
     }
 
-    toDOM(view: EditorView): HTMLElement {
+    override toDOM(view: EditorView): HTMLElement {
         const el = getViewDocument(view).createElement('div');
         el.className = 'hl-gutter-marker';
         el.setAttribute('data-level', String(this.level));
@@ -333,7 +333,7 @@ class HeadingMarker extends GutterMarker {
         return el;
     }
 
-    eq(other: GutterMarker): boolean {
+    override eq(other: GutterMarker): boolean {
         return other instanceof HeadingMarker && other.level === this.level;
     }
 }
