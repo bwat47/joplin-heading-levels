@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 
 function getGlobalDocument(): Document {
-    const doc = globalThis.document;
+    const doc = (globalThis as { document?: Document }).document;
     if (!doc) {
         throw new Error('No global document is available for heading-level DOM operations.');
     }
@@ -10,7 +10,7 @@ function getGlobalDocument(): Document {
 }
 
 function getGlobalWindow(): Window {
-    const viewWindow = globalThis.window;
+    const viewWindow = (globalThis as { window?: Window }).window;
     if (!viewWindow) {
         throw new Error('No global window is available for heading-level DOM operations.');
     }

@@ -648,7 +648,7 @@ function createGutterExtension() {
 }
 
 async function setupEditor(context: ContentScriptContext, editorControl: CodeMirrorControl): Promise<void> {
-    if (!editorControl?.cm6) {
+    if (!editorControl.cm6) {
         logger.warn('CodeMirror 6 not available; skipping heading level gutter.');
         return;
     }
