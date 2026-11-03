@@ -1,3 +1,5 @@
+import { syntaxTree } from '@codemirror/language';
+import { Compartment, Facet, RangeSetBuilder, StateEffect, StateField, type RangeSet } from '@codemirror/state';
 import {
     EditorView,
     gutter,
@@ -9,9 +11,16 @@ import {
     type Tooltip,
     type ViewUpdate,
 } from '@codemirror/view';
-import { syntaxTree } from '@codemirror/language';
-import { Compartment, Facet, RangeSetBuilder, type RangeSet, StateEffect, StateField } from '@codemirror/state';
+
 import type { CodeMirrorControl, ContentScriptContext, MarkdownEditorContentScriptModule } from 'api/types';
+import { logger } from '../../logger';
+import {
+    cancelViewAnimationFrame,
+    getViewDocument,
+    getViewResizeObserver,
+    getViewWindow,
+    requestViewAnimationFrame,
+} from './domContext';
 import {
     buildHeadingChange,
     findHeadingAtLine,
@@ -22,14 +31,6 @@ import {
     type HeadingLevel,
 } from './headingHelpers';
 import { calculateGutterOffset, hasRoomForOverlaidGutter, type GutterOffsetInput } from './layoutHelpers';
-import {
-    cancelViewAnimationFrame,
-    getViewDocument,
-    getViewResizeObserver,
-    getViewWindow,
-    requestViewAnimationFrame,
-} from './domContext';
-import { logger } from '../../logger';
 
 const COMMAND_SET_CONFIG = 'headingLevels__setConfig';
 

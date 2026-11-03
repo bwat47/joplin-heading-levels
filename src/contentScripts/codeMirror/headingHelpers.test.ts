@@ -1,5 +1,6 @@
 import { EditorState, Text, type ChangeSpec } from '@codemirror/state';
 import { parser } from '@lezer/markdown';
+
 import {
     buildHeadingChange,
     findHeadingAtLine,
