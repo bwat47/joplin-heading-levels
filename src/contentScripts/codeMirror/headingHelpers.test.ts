@@ -1,6 +1,12 @@
 import { EditorState, Text, type ChangeSpec } from '@codemirror/state';
 import { parser } from '@lezer/markdown';
-import { buildHeadingChange, findHeadingAtLine, headingsEqual, type HeadingInfo } from './headingHelpers';
+import {
+    buildHeadingChange,
+    findHeadingAtLine,
+    headingsEqual,
+    type HeadingInfo,
+    type HeadingLevel,
+} from './headingHelpers';
 
 function headingAt(source: string, lineNumber = 1): { doc: Text; heading: HeadingInfo } {
     const doc = Text.of(source.split('\n'));
@@ -14,7 +20,7 @@ function applyChange(source: string, change: ChangeSpec): string {
     return state.update({ changes: change }).state.doc.toString();
 }
 
-function changeHeading(source: string, newLevel: number | null, lineNumber = 1): string {
+function changeHeading(source: string, newLevel: HeadingLevel | null, lineNumber = 1): string {
     const { doc, heading } = headingAt(source, lineNumber);
     const change = buildHeadingChange(doc, heading, newLevel);
     if (!change) throw new Error(`Expected a heading change for ${JSON.stringify(source)}`);
@@ -108,7 +114,7 @@ describe('buildHeadingChange – ATX', () => {
     it.each(['## Heading ##', '  ##  Heading ##', '> ## Quoted ##', '## ##', '## Heading #####'])(
         're-parses at the requested level after a rewrite: %s',
         (source) => {
-            for (const level of [1, 3, 6]) {
+            for (const level of [1, 3, 6] as const) {
                 const rewritten = changeHeading(source, level);
                 expect(headingAt(rewritten).heading.level).toBe(level);
             }
@@ -181,13 +187,10 @@ describe('buildHeadingChange – setext', () => {
 });
 
 describe('heading change validation', () => {
-    it('returns null when the requested level is unchanged or invalid', () => {
+    it('returns null when the requested level is unchanged', () => {
         const { doc, heading } = headingAt('## Heading');
 
         expect(buildHeadingChange(doc, heading, 2)).toBeNull();
-        expect(buildHeadingChange(doc, heading, 0)).toBeNull();
-        expect(buildHeadingChange(doc, heading, 7)).toBeNull();
-        expect(buildHeadingChange(doc, heading, 2.5)).toBeNull();
     });
 
     it('returns null for stale or inconsistent marker ranges', () => {

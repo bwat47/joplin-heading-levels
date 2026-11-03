@@ -3,6 +3,10 @@ import type { SyntaxNodeRef, Tree } from '@lezer/common';
 
 type HeadingType = 'atx' | 'setext';
 
+export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
+
+export type HeadingLevel = (typeof HEADING_LEVELS)[number];
+
 /**
  * The syntax-tree range and markers for a Markdown heading.
  *
@@ -17,7 +21,7 @@ export interface HeadingInfo {
     markerTo: number;
     closingFrom: number | null;
     closingTo: number | null;
-    level: number;
+    level: HeadingLevel;
     type: HeadingType;
 }
 
@@ -40,7 +44,8 @@ export function headingInfoFromNode(node: SyntaxNodeRef): HeadingInfo | null {
         markerTo: marker.to,
         closingFrom: closing ? closing.from : null,
         closingTo: closing ? closing.to : null,
-        level: Number(match[2]),
+        // HEADING_NODE_PATTERN only captures a single digit in 1–6.
+        level: Number(match[2]) as HeadingLevel,
         type: match[1] === 'ATX' ? 'atx' : 'setext',
     };
 }
@@ -121,7 +126,7 @@ function atxClosingRange(doc: Text, heading: HeadingInfo): { from: number; to: n
     return { from: heading.closingFrom, to: heading.closingTo };
 }
 
-function buildAtxChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+function buildAtxChange(doc: Text, heading: HeadingInfo, newLevel: HeadingLevel | null): ChangeSpec | null {
     const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
     if (marker !== '#'.repeat(heading.level)) return null;
 
@@ -174,7 +179,7 @@ function setextContent(doc: Text, heading: HeadingInfo): string {
     return content.join(' ');
 }
 
-function buildSetextChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+function buildSetextChange(doc: Text, heading: HeadingInfo, newLevel: HeadingLevel | null): ChangeSpec | null {
     const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
     const expectedMarker = heading.level === 1 ? '=' : '-';
     if (!marker || [...marker].some((character) => character !== expectedMarker)) return null;
@@ -205,9 +210,8 @@ function buildSetextChange(doc: Text, heading: HeadingInfo, newLevel: number | n
 }
 
 /** Build one localized edit for changing or removing a syntax-tree heading. */
-export function buildHeadingChange(doc: Text, heading: HeadingInfo, newLevel: number | null): ChangeSpec | null {
+export function buildHeadingChange(doc: Text, heading: HeadingInfo, newLevel: HeadingLevel | null): ChangeSpec | null {
     if (!hasValidRanges(doc, heading)) return null;
-    if (newLevel !== null && (!Number.isInteger(newLevel) || newLevel < 1 || newLevel > 6)) return null;
     if (newLevel === heading.level) return null;
 
     return heading.type === 'atx' ? buildAtxChange(doc, heading, newLevel) : buildSetextChange(doc, heading, newLevel);

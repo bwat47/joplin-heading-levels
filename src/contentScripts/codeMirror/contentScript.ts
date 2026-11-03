@@ -15,9 +15,11 @@ import type { CodeMirrorControl, ContentScriptContext, MarkdownEditorContentScri
 import {
     buildHeadingChange,
     findHeadingAtLine,
+    HEADING_LEVELS,
     headingInfoFromNode,
     headingsEqual,
     type HeadingInfo,
+    type HeadingLevel,
 } from './headingHelpers';
 import { calculateGutterOffset, hasRoomForOverlaidGutter, type GutterOffsetInput } from './layoutHelpers';
 import {
@@ -39,7 +41,7 @@ const DEFAULT_CONFIG: Config = { gutterPlacement: 'after' };
 
 const configFacet = Facet.define<Config, Config>({
     combine(configs) {
-        return configs.length > 0 ? configs[configs.length - 1] : DEFAULT_CONFIG;
+        return configs[configs.length - 1] ?? DEFAULT_CONFIG;
     },
 });
 
@@ -321,7 +323,7 @@ const gutterPlacementExtension = EditorView.editorAttributes.compute([configFace
 // ---------------------------------------------------------------------------
 
 class HeadingMarker extends GutterMarker {
-    constructor(readonly level: number) {
+    constructor(readonly level: HeadingLevel) {
         super();
     }
 
@@ -339,7 +341,14 @@ class HeadingMarker extends GutterMarker {
 }
 
 /** One pre-created marker per level (1–6) for reuse across renders. */
-const LEVEL_MARKERS: HeadingMarker[] = [1, 2, 3, 4, 5, 6].map((l) => new HeadingMarker(l));
+const LEVEL_MARKERS: Record<HeadingLevel, HeadingMarker> = {
+    1: new HeadingMarker(1),
+    2: new HeadingMarker(2),
+    3: new HeadingMarker(3),
+    4: new HeadingMarker(4),
+    5: new HeadingMarker(5),
+    6: new HeadingMarker(6),
+};
 
 function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
     const builder = new RangeSetBuilder<GutterMarker>();
@@ -353,7 +362,7 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
             if (!heading) return;
 
             const lineFrom = view.state.doc.lineAt(heading.from).from;
-            builder.add(lineFrom, lineFrom, LEVEL_MARKERS[heading.level - 1]);
+            builder.add(lineFrom, lineFrom, LEVEL_MARKERS[heading.level]);
             return false;
         },
     });
@@ -485,17 +494,16 @@ function createHeadingMenuTooltip(menuState: HeadingMenuState): Tooltip {
             menu.className = 'hl-heading-menu';
             menu.setAttribute('role', 'menu');
 
-            for (let l = 1; l <= 6; l++) {
+            for (const level of HEADING_LEVELS) {
                 const item = doc.createElement('div');
                 item.className = 'hl-heading-menu-item';
-                if (l === menuState.heading.level) item.classList.add('hl-heading-menu-item-current');
-                item.textContent = `Heading ${l}`;
+                if (level === menuState.heading.level) item.classList.add('hl-heading-menu-item-current');
+                item.textContent = `Heading ${level}`;
                 item.setAttribute('role', 'menuitem');
-                const targetLevel = l;
                 item.addEventListener('pointerdown', (event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    applyHeadingChange(view, menuState.heading, targetLevel);
+                    applyHeadingChange(view, menuState.heading, level);
                 });
                 menu.appendChild(item);
             }
@@ -575,7 +583,7 @@ const headingMenuStateField = StateField.define<HeadingMenuState | null>({
 // Heading change application
 // ---------------------------------------------------------------------------
 
-function applyHeadingChange(view: EditorView, heading: HeadingInfo, newLevel: number | null): void {
+function applyHeadingChange(view: EditorView, heading: HeadingInfo, newLevel: HeadingLevel | null): void {
     const doc = view.state.doc;
 
     const headingLine = doc.lineAt(heading.from);
