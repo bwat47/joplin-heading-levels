@@ -11,3 +11,4 @@ publish/
 *.diff
 gemini/
 prompts/
+.api-staging-*/
