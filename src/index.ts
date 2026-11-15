@@ -58,6 +58,7 @@ void joplin.plugins.register({
             if (message.type === 'getSettings') {
                 return { gutterPlacement: await getGutterPlacement() };
             }
+            return null;
         });
 
         await joplin.settings.onChange((event) => {

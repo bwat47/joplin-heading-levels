@@ -66,6 +66,7 @@ export function findHeadingAtLine(tree: Tree, doc: Text, lineFrom: number): Head
                 heading = candidate;
                 return false;
             }
+            return true;
         },
     });
 
@@ -182,7 +183,7 @@ function setextContent(doc: Text, heading: HeadingInfo): string {
 function buildSetextChange(doc: Text, heading: HeadingInfo, newLevel: HeadingLevel | null): ChangeSpec | null {
     const marker = doc.sliceString(heading.markerFrom, heading.markerTo);
     const expectedMarker = heading.level === 1 ? '=' : '-';
-    if (!marker || [...marker].some((character) => character !== expectedMarker)) return null;
+    if (!marker || marker !== expectedMarker.repeat(marker.length)) return null;
 
     const underlineLine = doc.lineAt(heading.markerFrom);
 
