@@ -18,8 +18,9 @@ export default defineConfig({
         'typescript/no-unsafe-type-assertion': 'off',
         'import/no-cycle': 'error',
         'import/no-duplicates': ['error', { preferInline: true }],
-        // `Array#toSorted()` is ES2023; this plugin targets ES2020.
+        // toSorted()/toReversed() are ES2023; the build targets ES2020.
         'unicorn/no-array-sort': 'off',
+        'unicorn/no-array-reverse': 'off',
         'typescript/no-explicit-any': 'error',
         'typescript/explicit-module-boundary-types': 'error',
         'typescript/no-inferrable-types': 'error',
