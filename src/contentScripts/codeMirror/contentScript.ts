@@ -360,7 +360,7 @@ function buildHeadingMarkers(view: EditorView): RangeSet<GutterMarker> {
         to,
         enter(node) {
             const heading = headingInfoFromNode(node);
-            if (!heading) return;
+            if (!heading) return true;
 
             const lineFrom = view.state.doc.lineAt(heading.from).from;
             builder.add(lineFrom, lineFrom, LEVEL_MARKERS[heading.level]);
@@ -478,7 +478,7 @@ interface HeadingMenuState {
 }
 
 const openHeadingMenuEffect = StateEffect.define<HeadingMenuState>();
-const closeHeadingMenuEffect = StateEffect.define<null>();
+const closeHeadingMenuEffect = StateEffect.define();
 
 function closeHeadingMenu(view: EditorView): void {
     view.dispatch({ effects: closeHeadingMenuEffect.of(null) });
@@ -658,6 +658,7 @@ async function setupEditor(context: ContentScriptContext, editorControl: CodeMir
     // Fetch initial config from the main plugin
     let config: Config = DEFAULT_CONFIG;
     try {
+        // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Joplin's content script API, not window.postMessage
         const response: unknown = await context.postMessage({ type: 'getSettings' });
         if (response && typeof response === 'object') {
             config = response as Config;
